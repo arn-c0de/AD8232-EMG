@@ -1,6 +1,7 @@
 # AD8232 EMG — ESP32 + OTA
 
 ![Firmware: ESP32](https://img.shields.io/badge/Firmware-ESP32-0f766e)
+![Channels: 2](https://img.shields.io/badge/Channels-2%20(expandable)-0f766e)
 ![Signal Path: AD8232 to WiFi TCP](https://img.shields.io/badge/Signal%20Path-AD8232%20%E2%86%92%20WiFi%20TCP-1d4ed8)
 ![Backend: Python Stdlib API](https://img.shields.io/badge/Backend-Python%20stdlib%20API-2563eb)
 ![GUI: Tkinter and Matplotlib](https://img.shields.io/badge/GUI-Tkinter%20%2B%20Matplotlib-7c3aed)
@@ -11,60 +12,120 @@
 > [!NOTE]
 > Use OTA for normal firmware updates whenever possible. Avoid connecting the EMG setup directly to a PC over USB while it is attached to the body, because ground faults, wiring mistakes, or accidental shorts can create an unnecessary safety risk. Use USB only for the initial flash and prefer battery-powered operation during measurements.
 
-Single-channel surface EMG from the forearm using an AD8232 module and ESP32.
-Data streams over WiFi to a Python GUI. The ESP32 runs on a USB powerbank;
-flashing is done wirelessly via OTA after the first USB flash.
+Modular multi-channel surface EMG using one or more AD8232 modules and an
+ESP32. Channel count, pin assignment and labels are defined in a single
+table in `firmware/emg_ota/config.h` — add a row to add a channel; the API
+and GUI pick up the new layout automatically. Data streams over WiFi to a
+Python GUI. The ESP32 runs on a USB powerbank; flashing is done wirelessly
+via OTA after the first USB flash.
 
 See also: [Roadmap](docs/ROADMAP.md) · [Single-Channel EMG Guide](docs/SINGLE_CHANNEL_EMG_PLACEMENT_GUIDE.md) · [Multi-Channel EMG Guide](docs/MULTI_CHANNEL_EMG_GESTURE_GUIDE.md) · [Changelog](CHANGELOG.md) · [API Reference](API.md) · [License](LICENSE)
 
 ![EMG Monitor GUI](images/main-gui.png)
 
-## Wiring — AD8232 → ESP32
+## Wiring — 2× AD8232 → ESP32
+
+Each AD8232 module connects to 3V3, GND, SDN (tied high) and three GPIOs.
+The current two-channel configuration:
 
 ```
-AD8232        ESP32
-─────────     ──────────────
-3.3V    ───── 3.3V
-GND     ───── GND
-OUTPUT  ───── GPIO 34   (ADC1_CH6 — analog EMG signal)
-LO+     ───── GPIO 16   (lead-off detection +)
-LO-     ───── GPIO 17   (lead-off detection -)
-SDN     ───── 3.3V      (always on)
+AD8232 (CH0 — FCR, flexor)    ESP32
+──────────────────────────    ──────────────────────────────────────
+3.3V    ─────────────────── 3.3V       (shared rail)
+GND     ─────────────────── GND        (shared rail)
+OUTPUT  ─────────────────── GPIO 34    (ADC1_CH6  — EMG signal CH0)
+LO+     ─────────────────── GPIO 16    (lead-off detect +, CH0)
+LO-     ─────────────────── GPIO 17    (lead-off detect −, CH0)
+SDN     ─────────────────── 3.3V       (always on)
+
+AD8232 (CH1 — ED, extensor)   ESP32
+──────────────────────────    ──────────────────────────────────────
+3.3V    ─────────────────── 3.3V       (shared rail)
+GND     ─────────────────── GND        (shared rail)
+OUTPUT  ─────────────────── GPIO 35    (ADC1_CH7  — EMG signal CH1)
+LO+     ─────────────────── GPIO 18    (lead-off detect +, CH1)
+LO-     ─────────────────── GPIO 19    (lead-off detect −, CH1)
+SDN     ─────────────────── 3.3V       (always on)
+```
+
+**ADC1 pins only for OUTPUT** — ADC2 (GPIO 0/2/4/12–15/25–27) does not work
+while WiFi is active. Valid ADC1 pins: GPIO 32, 33, 34, 35, 36, 39.
+`LO+` / `LO-` accept any free GPIO.
+
+### Adding or removing modules
+
+Edit `firmware/emg_ota/config.h`. One row = one module. Update `NUM_CHANNELS`
+to match. Re-flash. The API and GUI discover the new layout automatically from
+the stream header — no Python code changes needed.
+
+```cpp
+#define NUM_CHANNELS 2   // ← change this number
+
+static const ChannelPins CHANNELS[NUM_CHANNELS] = {
+    { 34, 16, 17, "FCR" },   // CH0 — forearm flexor   (palm-up,   near elbow)
+    { 35, 18, 19, "ED"  },   // CH1 — forearm extensor (palm-down, near elbow)
+ // { 36, 21, 22, "FCU" },   // CH2 — ulnar flexor              (uncomment to add)
+ // { 39, 23, 25, "BRD" },   // CH3 — brachioradialis / radials (uncomment to add)
+};
 ```
 
 ---
 
 ## Electrode Placement (forearm, surface EMG)
 
+Each AD8232 module has three leads: YELLOW (LA+), RED (RA−), GREEN (RL ref).
+Clean skin with alcohol before attaching. The two active electrodes must be
+aligned along the local muscle fiber direction, 2–3 cm apart.
+
+### CH0 — FCR / flexor side (palm up)
+
 ```
-Palm facing UP — inner forearm
+Palm facing UP — inner forearm (volar side)
 
-  Elbow                                        Wrist
-    │                                            │
-────┤█████████████████████████████████████───────┤────
-    │                                            │
-    │   [YELLOW LA+]    [RED RA-]    [GREEN RL]  │
-    │        │               │            │      │
-    │    ~5 cm from      ~3 cm toward   wrist    │
-    │    elbow           wrist          bone     │
-    │    (muscle belly)                (bony,    │
-    │                                  no muscle)│
+  Elbow                                          Wrist
+    │                                              │
+────┤███████████████████████████████████████───────┤────
+    │                                              │
+    │  [YELLOW LA+]    [RED RA-]      [GREEN RL]   │
+    │       │               │              │       │
+    │   ~5 cm from      ~3 cm toward   wrist bone  │
+    │   elbow           wrist          (ulnar       │
+    │   (muscle belly)                 styloid)     │
 ```
 
-| Cable  | AD8232 Pin | Position |
-|--------|-----------|----------|
-| YELLOW | LA+       | Muscle belly, ~5 cm from elbow (inner forearm) |
-| RED    | RA−       | 2–3 cm toward wrist from yellow, same line |
-| GREEN  | RL (REF)  | Wrist bone (ulnar styloid) — no muscle tissue |
+| Cable  | Pin  | Position |
+|--------|------|----------|
+| YELLOW | LA+  | Muscle belly, ~5 cm from elbow, inner forearm |
+| RED    | RA−  | 2–3 cm toward wrist from YELLOW, same line |
+| GREEN  | RL   | Wrist bone (ulnar styloid) — bony, no muscle |
 
-> Both signal electrodes (YELLOW + RED) must be on the **inner forearm** (palm up),
-> aligned **along** the muscle fiber direction.
-> Clean skin with alcohol before attaching for better contact.
+### CH1 — ED / extensor side (palm down)
 
-In practice:
-- `YELLOW (LA+)`: place it first on the inner forearm over the main muscle belly, closer to the elbow.
-- `RED (RA-)`: place it on the same line a little closer to the wrist, about 2 to 3 cm away from the yellow electrode.
-- `GREEN (RL)`: place it on a bony reference point near the wrist, not on the active muscle.
+```
+Palm facing DOWN — outer forearm (dorsal side)
+
+  Elbow                                          Wrist
+    │                                              │
+────┤███████████████████████████████████████───────┤────
+    │                                              │
+    │  [YELLOW LA+]    [RED RA-]      [GREEN RL]   │
+    │       │               │              │       │
+    │   ~4 cm from      ~3 cm toward   wrist bone  │
+    │   elbow           wrist          (radial      │
+    │   (ED belly,                     styloid)     │
+    │    outer forearm)                             │
+```
+
+| Cable  | Pin  | Position |
+|--------|------|----------|
+| YELLOW | LA+  | Extensor digitorum belly, ~4 cm from elbow, outer forearm |
+| RED    | RA−  | 2–3 cm toward wrist from YELLOW, same line |
+| GREEN  | RL   | Wrist bone (radial styloid) — bony, no muscle |
+
+> The GREEN reference electrode can be shared between both modules if you
+> place it on a neutral bony site (e.g. ulnar styloid). Use a separate wire
+> from a single electrode to both RL inputs. This reduces electrode count
+> from 6 to 5.
 
 ---
 
@@ -119,26 +180,33 @@ python3 gui/emg_gui.py
 
 ## Calibration (in GUI)
 
-1. Press **CALIBRATE**
-2. Relax arm completely → press **START** → hold still for 5 s
-3. Tense arm / make a fist → press **START** → hold for 5 s
-4. Threshold is set automatically and saved to `calibration.json`
-5. Calibration loads automatically on next start — no need to redo it
+Each channel is calibrated independently.
+
+1. Pick the channel from the **CH** dropdown
+2. Press **CALIBRATE**
+3. Relax that muscle → press **START** → hold still for 5 s
+4. Tense that muscle / make a fist → press **START** → hold for 5 s
+5. Per-channel threshold is set automatically and saved to `calibration.json`
+6. Calibration loads automatically on next start — no need to redo it
+
+Use **RESET ALL** in the bottom bar to clear every channel's calibration in
+one go, or `POST /channel/{id}/calibration/reset` for a single channel.
 
 ---
 
 ## Data Stream
 
-The ESP32 sends CSV over TCP on port `8888`:
+The ESP32 sends a self-describing CSV stream over TCP on port `8888`:
 ```
-raw,rms
-2105,42.3
-2089,38.7
-LEAD_OFF        ← electrodes detached
+#CH:2,FCR,ED         ← header sent on every new connection
+2105,42.3,1890,38.1  ← one line per sample tick: rawN,rmsN per channel
+2089,38.7,1875,35.2
+LEAD_OFF:1           ← per-channel lead-off pulse, 10 Hz while detached
 ```
 
 - `raw` — 12-bit ADC value (0–4095, center ≈ 2048)
-- `rms` — RMS envelope over 200 ms window
+- `rms` — RMS envelope over a 100 ms window (after DC tracker + 20 Hz HP filter)
+- header label list comes from `CHANNELS[]` in `config.h`
 
 ---
 

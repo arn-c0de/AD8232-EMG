@@ -4,6 +4,26 @@ All notable changes to this project are documented here.
 
 ---
 
+## [1.1.0] — 2026-05-09
+
+### Architecture — modular multi-channel support
+
+- **`config.h`**: replaced three separate `#define` pin constants with a `ChannelPins` struct array — one row per AD8232 module. `NUM_CHANNELS` is the only value to change when adding or removing a module.
+- **`emg_ota.ino`**: introduced a `Channel` struct holding per-channel DC tracker, HP filter and RMS ring buffer state. The main loop iterates over `CHANNELS[]` so new channels require no firmware logic changes.
+- **Wire protocol**: self-describing stream. On every new TCP connection the ESP32 sends `#CH:<n>,<label0>,…` before data, so the Python side always knows the channel layout without hardcoded counts. Data lines carry all channels in one CSV: `raw0,rms0,raw1,rms1,…`. Lead-off events are per-channel: `LEAD_OFF:<idx>`.
+- **`emg_api.py`**: multi-channel state model. New channel-indexed REST endpoints: `GET /channels`, `GET /channel/{id}`, `GET /channel/{id}/threshold`, `POST /channel/{id}/threshold`, `POST /channel/{id}/record`, `GET /channel/{id}/calibration`, `POST /channel/{id}/calibration/reset`, `POST /calibration/reset`. Channel list is rebuilt live from stream headers; `calibration.json` stores thresholds and recordings per channel. Legacy single-channel calibration files are migrated automatically on load.
+- **`gui/emg_gui.py`**: fully dynamic layout — one Raw plot (all channels overlaid with legend) plus one RMS subplot per channel, built at runtime from `GET /live`. Side panel shows one threshold row per channel with label, current value, manual entry and SET button. The drag-to-set threshold works on every RMS subplot independently. Calibration wizard has a channel selector dropdown. GUI rebuilds itself automatically when the stream header announces a different channel count.
+- **Default configuration**: 2 channels — `FCR` on GPIO 34/16/17 (forearm flexor, palm-up) and `ED` on GPIO 35/18/19 (forearm extensor, palm-down).
+
+### Monitor (`monitor.sh`)
+- Fallback terminal view updated for the new stream format: reads `#CH` header, parses N-pair CSV, displays CH0 bar; handles `LEAD_OFF:<idx>` cleanly.
+
+### Documentation
+- `README.md`: wiring section extended with two-module pin table and instructions for adding further channels.
+- `API.md`: fully rewritten for channel-indexed endpoints; includes wire format reference.
+
+---
+
 ## [1.0.1] — 2026-05-09
 
 ### Signal Quality

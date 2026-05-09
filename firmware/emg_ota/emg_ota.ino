@@ -9,10 +9,11 @@ WiFiClient tcpClient;
 const int SAMPLES_PER_WINDOW = (SAMPLE_RATE_HZ * RMS_WINDOW_MS) / 1000;
 const unsigned long SAMPLE_INTERVAL_US = 1000000UL / SAMPLE_RATE_HZ;
 
-unsigned long lastSampleUs = 0;
+unsigned long lastSampleUs   = 0;
+unsigned long lastLeadOffUs  = 0;
 float rmsBuffer[SAMPLES_PER_WINDOW];
-int bufferIndex = 0;
-long bufferSum = 0;
+int   bufferIndex = 0;
+long  bufferSum   = 0;
 
 void setup() {
   Serial.begin(115200);
@@ -21,7 +22,12 @@ void setup() {
 
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.print("Connecting WiFi");
+  unsigned long wifiStart = millis();
   while (WiFi.status() != WL_CONNECTED) {
+    if (millis() - wifiStart > 20000) {
+      Serial.println("\nWiFi timeout — rebooting");
+      ESP.restart();
+    }
     delay(500);
     Serial.print(".");
   }
@@ -50,9 +56,12 @@ void loop() {
   if (now - lastSampleUs < SAMPLE_INTERVAL_US) return;
   lastSampleUs = now;
 
-  // lead-off check — electrodes detached
+  // lead-off check — throttled to 10 Hz to avoid flooding the stream
   if (digitalRead(LO_PLUS_PIN) || digitalRead(LO_MINUS_PIN)) {
-    sendLine("LEAD_OFF");
+    if (now - lastLeadOffUs >= 100000UL) {
+      sendLine("LEAD_OFF");
+      lastLeadOffUs = now;
+    }
     return;
   }
 

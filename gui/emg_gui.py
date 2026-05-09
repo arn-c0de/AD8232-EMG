@@ -4,7 +4,7 @@ EMG Live GUI — tkinter + embedded matplotlib
 Reads from emg_api.py (localhost:5555)
 Usage: python3 emg_gui.py [api_host] [api_port]
 """
-import sys, threading, time, collections, json, tkinter as tk
+import sys, threading, time, collections, json, tkinter as tk, traceback
 from tkinter import font as tkfont
 from urllib.request import urlopen, Request
 import matplotlib
@@ -31,6 +31,7 @@ live     = {"state": "relaxed", "rms": 0.0, "rms_smooth": 0.0,
             "threshold": 80.0, "connected": False}
 cal      = {"step": 0, "active": False, "msg": "", "sub": ""}
 drag     = {"active": False, "enabled": False}
+dirty    = {"plot": False}
 
 # ── API helpers ───────────────────────────────────────────────────────────────
 def api_get(path):
@@ -61,9 +62,11 @@ def poll_loop():
                 rms_val = d.get("rms_smooth") or d.get("rms", 0)
                 rms_buf.append(rms_val)
                 raw_buf.append(d.get("raw", 2048))
-        except Exception:
+                dirty["plot"] = True
+        except Exception as e:
             with lock:
                 live["connected"] = False
+            print(f"[poll] {e}", file=sys.stderr)
         time.sleep(0.04)
 
 threading.Thread(target=poll_loop, daemon=True).start()
@@ -323,10 +326,15 @@ def refresh():
 
         thr = s.get("threshold", 80)
 
-        line_raw.set_ydata(raw)
-        line_rms.set_ydata(rms)
-        thr_line.set_ydata([thr, thr])
-        canvas.draw_idle()
+        with lock:
+            need_redraw = dirty["plot"] or drag["active"]
+            dirty["plot"] = False
+
+        if need_redraw:
+            line_raw.set_ydata(raw)
+            line_rms.set_ydata(rms)
+            thr_line.set_ydata([thr, thr])
+            canvas.draw_idle()
 
         # state banner
         rms_val = s.get("rms_smooth") or s.get("rms", 0)
@@ -350,7 +358,7 @@ def refresh():
         btn_start.configure(bg="#0d4a1a" if step in (1, 3) else "#21262d")
 
     except Exception:
-        pass
+        traceback.print_exc(file=sys.stderr)
     finally:
         root.after(60, refresh)
 

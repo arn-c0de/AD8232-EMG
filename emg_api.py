@@ -59,20 +59,26 @@ lock = threading.Lock()
 
 # ── ESP32 reader thread ────────────────────────────────────────────────────────
 def esp_reader():
+    lead_off_sent_at = 0.0
     while True:
+        sock = None
         try:
             sock = socket.create_connection((ESP_HOST, ESP_PORT), timeout=5)
             with lock: state["connected"] = True
             buf = ""
             while True:
                 chunk = sock.recv(512).decode("utf-8", errors="ignore")
-                if not chunk: break
+                if not chunk:
+                    break          # EOF — exit inner loop, reconnect below
                 buf += chunk
                 while "\n" in buf:
                     line, buf = buf.split("\n", 1)
                     line = line.strip()
                     if line == "LEAD_OFF":
-                        with lock: state["lead_off"] = True
+                        now = time.time()
+                        if now - lead_off_sent_at >= 0.1:   # throttle to 10 Hz
+                            with lock: state["lead_off"] = True
+                            lead_off_sent_at = now
                         continue
                     parts = line.split(",")
                     if len(parts) == 2:
@@ -92,6 +98,11 @@ def esp_reader():
                         except ValueError:
                             pass
         except Exception:
+            pass
+        finally:
+            if sock:
+                try: sock.close()
+                except Exception: pass
             with lock: state["connected"] = False
             time.sleep(2)
 
@@ -164,13 +175,16 @@ class Handler(BaseHTTPRequestHandler):
             seconds = max(1.0, min(30.0, seconds))
 
             print(f"Recording '{label}' for {seconds}s …")
-            t_end = time.time() + seconds
+            t_start = time.time()
+            t_end   = t_start + seconds
             samples = []
+            last_ts = 0.0
             while time.time() < t_end:
                 with lock:
-                    if history:
-                        samples.append(history[-1])
-                time.sleep(0.05)
+                    if history and history[-1]["t"] > last_ts:
+                        samples.append(dict(history[-1]))
+                        last_ts = history[-1]["t"]
+                time.sleep(0.005)
 
             if not samples:
                 json_response(self, 503, {"error": "no data from ESP32"})
@@ -209,8 +223,13 @@ class Handler(BaseHTTPRequestHandler):
             if value is None:
                 json_response(self, 400, {"error": "missing ?value="})
                 return
+            try:
+                thr = float(value)
+            except ValueError:
+                json_response(self, 400, {"error": f"invalid value: {value!r}"})
+                return
             with lock:
-                state["threshold"] = float(value)
+                state["threshold"] = thr
             save_calibration()
             json_response(self, 200, {"threshold": state["threshold"]})
 

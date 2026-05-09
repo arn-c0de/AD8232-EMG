@@ -4,34 +4,47 @@ All notable changes to this project are documented here.
 
 ---
 
-## [1.1.1] — 2026-05-09
+## [1.0.1 - Multi Channel update] — 2026-05-09
 
-### Hardware target — ESP32-C5 WROOM
+### Multi-channel architecture
 
-- **`config.h`**: pin assignments migrated to ESP32-C5 WROOM layout — CH0 `OUT=GPIO 0 / LO+=GPIO 6 / LO-=GPIO 7`, CH1 `OUT=GPIO 1 / LO+=GPIO 8 / LO-=GPIO 9`. ADC1 (GPIO 0–6) is the only ADC safe to use while WiFi is active on C5.
-- **`flash.sh`**: FQBN changed from `esp32:esp32:esp32` to `esp32:esp32:esp32c5`; `espota.py` path is now resolved dynamically from the newest installed core version (supports arduino-esp32 3.x).
-- **Core**: upgraded arduino-esp32 from 2.0.10 to 3.3.8 — required for ESP32-C5 support. ESP32-C3/classic ESP32 users should pin their core version.
-- **`README.md`**: wiring tables and ADC pin reference rewritten for ESP32-C5.
+- **`config.h`**: replaced fixed single-channel pin defines with a `ChannelPins` table. One row now defines one AD8232 module, and `NUM_CHANNELS` controls the layout.
+- **`emg_ota.ino`**: firmware now processes all configured channels in a loop using per-channel filter, RMS window and lead-off state.
+- **Wire protocol**: the ESP sends a self-describing header `#CH:<n>,<label0>,...` on every new TCP connection, followed by packed CSV samples `raw0,rms0,raw1,rms1,...`. Lead-off is now channel-specific via `LEAD_OFF:<idx>`.
+- **`emg_api.py`**: REST API upgraded to a channel-aware model with `GET /channels`, `GET /channel/{id}`, `GET /channel/{id}/threshold`, `POST /channel/{id}/threshold`, `POST /channel/{id}/record`, `GET /channel/{id}/calibration`, `POST /channel/{id}/calibration/reset` and `POST /calibration/reset`.
+- **Calibration persistence**: `calibration.json` now stores threshold and recordings per channel, while legacy single-channel calibration files are still accepted and migrated on load.
 
----
+### ESP32-C5 WROOM migration
 
-## [1.1.0] — 2026-05-09
+- **Hardware target changed to `ESP32-C5 WROOM`**.
+- **`config.h`**: current default pin layout is CH0 `OUT=GPIO 0 / LO+=GPIO 6 / LO-=GPIO 7`, CH1 `OUT=GPIO 1 / LO+=GPIO 8 / LO-=GPIO 9`.
+- **ADC note**: on ESP32-C5 only ADC1 pins `GPIO 0-6` are safe for analog sampling while WiFi is active.
+- **`flash.sh`**: board target updated from classic ESP32 to `esp32:esp32:esp32c5`; OTA upload helper path is resolved against newer arduino-esp32 3.x core installs.
+- **Core requirement**: moved from arduino-esp32 2.x to 3.3.8 for ESP32-C5 support.
 
-### Architecture — modular multi-channel support
+### GUI and plotting
 
-- **`config.h`**: replaced three separate `#define` pin constants with a `ChannelPins` struct array — one row per AD8232 module. `NUM_CHANNELS` is the only value to change when adding or removing a module.
-- **`emg_ota.ino`**: introduced a `Channel` struct holding per-channel DC tracker, HP filter and RMS ring buffer state. The main loop iterates over `CHANNELS[]` so new channels require no firmware logic changes.
-- **Wire protocol**: self-describing stream. On every new TCP connection the ESP32 sends `#CH:<n>,<label0>,…` before data, so the Python side always knows the channel layout without hardcoded counts. Data lines carry all channels in one CSV: `raw0,rms0,raw1,rms1,…`. Lead-off events are per-channel: `LEAD_OFF:<idx>`.
-- **`emg_api.py`**: multi-channel state model. New channel-indexed REST endpoints: `GET /channels`, `GET /channel/{id}`, `GET /channel/{id}/threshold`, `POST /channel/{id}/threshold`, `POST /channel/{id}/record`, `GET /channel/{id}/calibration`, `POST /channel/{id}/calibration/reset`, `POST /calibration/reset`. Channel list is rebuilt live from stream headers; `calibration.json` stores thresholds and recordings per channel. Legacy single-channel calibration files are migrated automatically on load.
-- **`gui/emg_gui.py`**: fully dynamic layout — one Raw plot (all channels overlaid with legend) plus one RMS subplot per channel, built at runtime from `GET /live`. Side panel shows one threshold row per channel with label, current value, manual entry and SET button. The drag-to-set threshold works on every RMS subplot independently. Calibration wizard has a channel selector dropdown. GUI rebuilds itself automatically when the stream header announces a different channel count.
-- **Default configuration**: 2 channels — `FCR` on GPIO 34/16/17 (forearm flexor, palm-up) and `ED` on GPIO 35/18/19 (forearm extensor, palm-down).
+- **`gui/emg_gui.py`**: GUI layout is now fully dynamic and rebuilds automatically from the live channel header.
+- One combined raw plot is shown at the top, with one RMS subplot per channel below it.
+- Each channel now has its own threshold row, label, manual threshold input and live state display.
+- Threshold dragging works independently per RMS plot.
+- Calibration flow now supports selecting the active channel.
+- Multi-channel plot refresh was fixed so later channels such as `CH1` are redrawn reliably after figure rebuilds instead of getting stuck on stale zero-state data.
+- RMS panels now show clearer live feedback with current-value titles, endpoint markers and filled RMS areas.
+- Global status banner now handles mixed states correctly, for example `ACTIVE` on one channel while another is `LEAD OFF`.
 
-### Monitor (`monitor.sh`)
-- Fallback terminal view updated for the new stream format: reads `#CH` header, parses N-pair CSV, displays CH0 bar; handles `LEAD_OFF:<idx>` cleanly.
+### Signal and runtime fixes
 
-### Documentation
-- `README.md`: wiring section extended with two-module pin table and instructions for adding further channels.
-- `API.md`: fully rewritten for channel-indexed endpoints; includes wire format reference.
+- Added guards in firmware against invalid RMS calculations and unstable square-root input.
+- Updated the analog setup for the new board target, including attenuation handling and safer channel behavior.
+- `emg_api.py`: root route `GET /` now returns API info instead of `404`.
+- `emg_api.py`: standard deviation calculation was rewritten without `statistics.stdev`, improving Python 3.12 compatibility.
+
+### Documentation and assets
+
+- **`README.md`**: updated throughout for `ESP32-C5 WROOM`, multi-channel wiring, ADC constraints, runtime notes and terminology cleanup.
+- **`API.md`**: documents the channel-aware API and wire format.
+- **`images/main-gui.png`**: screenshot replaced with the current multi-channel GUI.
 
 ---
 

@@ -17,12 +17,6 @@ flashing is done wirelessly via OTA after the first USB flash.
 
 ![EMG Monitor GUI](images/main-gui.png)
 
-## Maintainer
-
-`arn-c0de@protonmail.com`
-
----
-
 ## Wiring — AD8232 → ESP32
 
 ```
@@ -176,3 +170,9 @@ AD8232-EMG/
 | EMG REST API    | 5555 |
 | ESP32 TCP stream | 8888 |
 | ESP32 OTA       | 3232 |
+
+---
+
+## Contact
+
+`arn-c0de@protonmail.com`

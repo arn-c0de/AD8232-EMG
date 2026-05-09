@@ -44,12 +44,13 @@ AD8232 (CH1 — ED, extensor)      ESP32-C5 WROOM
 GND     ──────────────────────── GND        (shared rail)
 OUTPUT  ──────────────────────── GPIO 5     (ADC1_CH5 — EMG signal CH1)
 LO+     ──────────────────────── GPIO 8     (lead-off detect +, CH1)
-LO-     ──────────────────────── GPIO 9     (lead-off detect −, CH1)
+LO-     ──────────────────────── GPIO 10    (lead-off detect −, CH1)
 SDN     ──────────────────────── 3.3V       (always on)
 ```
 
 > GPIO 0–3 avoided for ADC output: GPIO 0 carries a BOOT pull-down on most
-> dev boards which corrupts readings.
+> dev boards which corrupts readings. GPIO 9 avoided for LO pins: it is the
+> BOOT/strapping pin with an internal pull-up that causes permanent LEAD_OFF.
 
 **ESP32-C5 ADC constraint:** only ADC1 pins (GPIO 0–6) work while WiFi is
 active. Never wire AD8232 OUTPUT to any other GPIO. `LO+` / `LO-` are digital
@@ -64,10 +65,10 @@ to match. Re-flash. The API and GUI discover the new layout automatically.
 #define NUM_CHANNELS 2   // ← change this number
 
 static const ChannelPins CHANNELS[NUM_CHANNELS] = {
-    {  0,  6,  7, "FCR" },   // CH0 — forearm flexor   (palm-up,   near elbow)
-    {  1,  8,  9, "ED"  },   // CH1 — forearm extensor (palm-down, near elbow)
- // {  2, 10, 11, "FCU" },   // CH2 — ulnar flexor              (uncomment to add)
- // {  3, 12, 13, "BRD" },   // CH3 — brachioradialis / radials (uncomment to add)
+    {  4,  6,  7, "FCR" },   // CH0 — forearm flexor   (palm-up,   near elbow)
+    {  5,  8, 10, "ED"  },   // CH1 — forearm extensor (palm-down, near elbow)
+ // {  2, 11, 12, "FCU" },   // CH2 — ulnar flexor              (uncomment to add)
+ // {  3, 13, 14, "BRD" },   // CH3 — brachioradialis / radials (uncomment to add)
 };
 ```
 

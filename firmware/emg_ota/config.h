@@ -31,8 +31,8 @@
 //   BOOT pull-down that corrupts ADC readings. Use GPIO 4–6 instead.
 //
 //   CH0  FCR  OUT=GPIO 4 (ADC1_CH4)  LO+=GPIO 6   LO-=GPIO 7
-//   CH1  ED   OUT=GPIO 5 (ADC1_CH5)  LO+=GPIO 8   LO-=GPIO 9
-//   CH2  FCU  OUT=GPIO 2 (ADC1_CH2)  LO+=GPIO 10  LO-=GPIO 11  (future)
+//   CH1  ED   OUT=GPIO 5 (ADC1_CH5)  LO+=GPIO 8   LO-=GPIO 10
+//   CH2  FCU  OUT=GPIO 2 (ADC1_CH2)  LO+=GPIO 11  LO-=GPIO 12  (future)
 //   CH3  BRD  OUT=GPIO 3 (ADC1_CH3)  LO+=GPIO 12  LO-=GPIO 13  (future)
 
 #define NUM_CHANNELS 2
@@ -46,7 +46,7 @@ struct ChannelPins {
 
 static const ChannelPins CHANNELS[NUM_CHANNELS] = {
     {  4,  6,  7, "FCR" },   // CH0 — forearm flexor   (palm-up,   near elbow)
-    {  5,  8,  9, "ED"  },   // CH1 — forearm extensor (palm-down, near elbow)
+    {  5,  8, 10, "ED"  },   // CH1 — forearm extensor (palm-down, near elbow)
  // {  2, 10, 11, "FCU" },   // CH2 — ulnar flexor
  // {  3, 12, 13, "BRD" },   // CH3 — brachioradialis / radial extensors
 };

@@ -350,6 +350,7 @@ threshold_box = tk.Frame(side, bg=THEME["panel"])
 threshold_box.pack(fill=tk.BOTH, expand=True, padx=8)
 
 threshold_widgets: list[dict] = []   # one row of widgets per channel
+channel_title_texts: list = []
 
 
 def rebuild_threshold_panel() -> None:
@@ -369,9 +370,15 @@ def rebuild_threshold_panel() -> None:
         tk.Label(head, text=f"CH{m['id']}  {m['label']}",
                  bg=THEME["panel"], fg=THEME["fg"], font=FONT_M
                  ).pack(side=tk.LEFT, padx=(2, 0))
+        state_lbl = tk.Label(head, text="—", bg=THEME["panel"],
+                             fg=THEME["muted"], font=FONT_S)
+        state_lbl.pack(side=tk.RIGHT, padx=(8, 0))
         val_lbl = tk.Label(head, text="—", bg=THEME["panel"],
                            fg=THEME["warn"], font=FONT_L)
         val_lbl.pack(side=tk.RIGHT)
+        rms_lbl = tk.Label(row, text="RMS live: —", bg=THEME["panel"],
+                           fg=THEME["accent"], font=FONT_S, anchor="w")
+        rms_lbl.pack(fill=tk.X, pady=(2, 0))
 
         entry_row = tk.Frame(row, bg=THEME["panel"])
         entry_row.pack(fill=tk.X, pady=(2, 0))
@@ -395,7 +402,12 @@ def rebuild_threshold_panel() -> None:
                   font=FONT_M, relief=tk.FLAT, padx=6, pady=2,
                   cursor="hand2").pack(side=tk.LEFT)
 
-        threshold_widgets.append({"val": val_lbl, "entry": entry})
+        threshold_widgets.append({
+            "val": val_lbl,
+            "entry": entry,
+            "state": state_lbl,
+            "rms": rms_lbl,
+        })
 
     # Update calibration channel selector to match.
     menu = cal_ch_menu["menu"]
@@ -422,6 +434,8 @@ ax_rms_list: list = []               # one RMS subplot per channel
 line_raw_list: list = []             # raw lines (one per channel)
 line_rms_list: list = []             # rms lines (one per channel)
 thr_lines:     list = []             # threshold dashed lines
+last_points:   list = []             # latest RMS point markers
+fill_polys:    list = []             # filled RMS areas
 t = np.arange(WINDOW)
 
 
@@ -444,10 +458,10 @@ def rms_ylim(values: list[float], threshold: float) -> tuple[float, float]:
 
 
 def rebuild_figure() -> None:
-    global ax_raw, ax_rms_list, line_raw_list, line_rms_list, thr_lines
+    global ax_raw, ax_rms_list, line_raw_list, line_rms_list, thr_lines, channel_title_texts, last_points, fill_polys
 
     fig.clear()
-    ax_rms_list, line_raw_list, line_rms_list, thr_lines = [], [], [], []
+    ax_rms_list, line_raw_list, line_rms_list, thr_lines, channel_title_texts, last_points, fill_polys = [], [], [], [], [], [], []
 
     n = max(1, len(ch_meta))
     # Layout: 1 raw plot on top + N rms subplots stacked below.
@@ -475,13 +489,20 @@ def rebuild_figure() -> None:
     for i, m in enumerate(ch_meta):
         color = CH_COLORS[i % len(CH_COLORS)]
         ax = fig.add_subplot(gs[i + 1])
-        style_axis(ax, f"RMS  CH{m['id']}  {m['label']}", (0, 700))
-        line, = ax.plot(t, [0.0] * WINDOW, color=color, lw=1.1)
+        style_axis(ax, "", (0, 700))
+        title = ax.set_title(f"RMS  CH{m['id']}  {m['label']}  |  live: 0.0",
+                             color=THEME["fg"], fontsize=9, pad=3, loc="left")
+        line, = ax.plot(t, [0.0] * WINDOW, color=color, lw=1.8)
+        point, = ax.plot([WINDOW - 1], [0.0], marker="o", ms=5, color=color)
+        fill = ax.fill_between(t, [0.0] * WINDOW, 0, color=color, alpha=0.16)
         thr_line = ax.axhline(80, color=THEME["warn"], lw=1.4, ls="--",
                               picker=6)
         ax_rms_list.append(ax)
         line_rms_list.append(line)
         thr_lines.append(thr_line)
+        channel_title_texts.append(title)
+        last_points.append(point)
+        fill_polys.append(fill)
 
     canvas.draw_idle()
     rebuild_threshold_panel()
@@ -547,17 +568,45 @@ def refresh() -> None:
 
         if need_rebuild:
             rebuild_figure()
+            # Re-read the current buffers after a rebuild so plots and titles do
+            # not render from a stale single-channel snapshot.
+            with lock:
+                snap = [dict(c) for c in channels]
+                raw_lists = [list(b) for b in raw_bufs]
+                rms_lists = [list(b) for b in rms_bufs]
             need_redraw = True
 
         if need_redraw and ax_raw is not None:
             for i, line in enumerate(line_raw_list):
                 if i < len(raw_lists):
                     line.set_ydata(raw_lists[i])
+                elif i < len(snap):
+                    line.set_ydata([float(snap[i].get("raw", 2048.0))] * WINDOW)
             for i, line in enumerate(line_rms_list):
                 if i < len(rms_lists):
-                    line.set_ydata(rms_lists[i])
-                    thr = snap[i]["threshold"] if i < len(snap) else 80.0
-                    ax_rms_list[i].set_ylim(*rms_ylim(rms_lists[i], thr))
+                    values = rms_lists[i]
+                elif i < len(snap):
+                    live_rms = float(snap[i].get("rms", 0.0))
+                    values = [live_rms] * WINDOW
+                else:
+                    continue
+
+                line.set_ydata(values)
+                thr = snap[i]["threshold"] if i < len(snap) else 80.0
+                ax_rms_list[i].set_ylim(*rms_ylim(values, thr))
+                if i < len(snap) and i < len(channel_title_texts) and i < len(ch_meta):
+                    live_rms = float(snap[i].get("rms", 0.0))
+                    channel_title_texts[i].set_text(
+                        f"RMS  CH{ch_meta[i]['id']}  {ch_meta[i]['label']}  |  live: {live_rms:.1f}"
+                    )
+                line.set_alpha(1.0 if any(v > 0.0 for v in values[-12:]) else 0.35)
+                if i < len(last_points):
+                    last_points[i].set_data([WINDOW - 1], [values[-1] if values else 0.0])
+                if i < len(fill_polys):
+                    fill_polys[i].remove()
+                    fill_polys[i] = ax_rms_list[i].fill_between(
+                        t, values, 0, color=CH_COLORS[i % len(CH_COLORS)], alpha=0.16
+                    )
             for i, thr_line in enumerate(thr_lines):
                 if i < len(snap):
                     thr_line.set_ydata([snap[i]["threshold"]] * 2)
@@ -571,7 +620,20 @@ def refresh() -> None:
             if i >= len(threshold_widgets):
                 break
             threshold_widgets[i]["val"].configure(text=f"{c['threshold']:.0f}")
+            threshold_widgets[i]["rms"].configure(
+                text=f"RMS live: {float(c.get('rms', 0.0)):.1f}"
+            )
             st = c.get("state")
+            if st == "tense":
+                state_text = "ACTIVE"
+                state_color = THEME["warn"]
+            elif st == "lead_off":
+                state_text = "LEAD OFF"
+                state_color = "#f0b36b"
+            else:
+                state_text = "RELAXED"
+                state_color = THEME["ok"]
+            threshold_widgets[i]["state"].configure(text=state_text, fg=state_color)
             if st == "tense":
                 any_tense = True
                 active_count += 1
@@ -580,12 +642,15 @@ def refresh() -> None:
 
         if not is_connected:
             color, label = THEME["off_bg"], "NO CONNECTION"
-        elif any_lead_off:
-            color, label = THEME["lead_bg"], "LEAD OFF"
+        elif any_tense and any_lead_off:
+            color = THEME["tense_bg"]
+            label = f"ACTIVE  {active_count}/{len(snap)}  |  LEAD OFF"
         elif any_tense:
             color = THEME["tense_bg"]
             label = (f"ACTIVE  {active_count}/{len(snap)}"
                      if len(snap) > 1 else "ACTIVE")
+        elif any_lead_off:
+            color, label = THEME["lead_bg"], "LEAD OFF"
         else:
             color, label = THEME["rest_bg"], "relaxed"
         state_frame.configure(bg=color)

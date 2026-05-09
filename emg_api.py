@@ -28,7 +28,6 @@ import json
 import os
 import re
 import socket
-import statistics
 import sys
 import threading
 import time
@@ -269,15 +268,18 @@ threading.Thread(target=esp_reader, daemon=True).start()
 
 # ── stats helpers ────────────────────────────────────────────────────────────
 def calc_stats(samples: list[dict]) -> dict:
-    rms_vals = [s["rms"] for s in samples]
-    raw_vals = [s["raw"] for s in samples]
+    rms_vals = [float(s["rms"]) for s in samples]
+    raw_vals = [float(s["raw"]) for s in samples]
+    n = len(rms_vals)
+    rms_mean = sum(rms_vals) / n
+    rms_stdev = (sum((x - rms_mean) ** 2 for x in rms_vals) / (n - 1)) ** 0.5 if n > 1 else 0.0
     return {
-        "count":     len(rms_vals),
-        "rms_mean":  round(statistics.mean(rms_vals), 2),
+        "count":     n,
+        "rms_mean":  round(rms_mean, 2),
         "rms_max":   round(max(rms_vals), 2),
         "rms_min":   round(min(rms_vals), 2),
-        "rms_stdev": round(statistics.stdev(rms_vals), 2) if len(rms_vals) > 1 else 0,
-        "raw_mean":  round(statistics.mean(raw_vals), 2),
+        "rms_stdev": round(rms_stdev, 2),
+        "raw_mean":  round(sum(raw_vals) / n, 2),
     }
 
 

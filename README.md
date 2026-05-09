@@ -95,7 +95,7 @@ OTA is the recommended update path for safety.
 
 Override OTA host:
 ```bash
-OTA_HOST=192.168.1.42 ./flash.sh
+OTA_HOST=your-esp32.local ./flash.sh
 ```
 
 ---

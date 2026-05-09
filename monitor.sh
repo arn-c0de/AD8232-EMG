@@ -15,7 +15,7 @@ if [[ $STOP -eq 1 ]]; then
   exit 0
 fi
 
-HOST="${EMG_HOST:-192.168.178.163}"
+HOST="${EMG_HOST:-emg-esp32.local}"
 PORT=8888
 API_HOST="${EMG_API_HOST:-127.0.0.1}"
 API_PORT="${EMG_API_PORT:-5555}"

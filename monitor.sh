@@ -95,14 +95,27 @@ if [[ -f "$GUI" ]]; then
   exit 0
 fi
 
-nc "$HOST" "$PORT" | while IFS=',' read -r raw rms; do
-  # lead-off line
-  if [[ "$raw" == "LEAD_OFF" ]]; then
-    printf "\r${YELLOW}  ⚠  LEAD OFF — check electrodes ${RESET}%-20s" " "
+# Fallback live view — reads the multi-channel CSV stream, displays CH0 only.
+# Stream:  #CH:<n>,<labels>   raw0,rms0,raw1,rms1,...   LEAD_OFF:<idx>
+nc "$HOST" "$PORT" | while IFS= read -r line; do
+  # header
+  if [[ "$line" == \#CH:* ]]; then
+    echo -e "${CYAN}stream: ${line}${RESET}"
+    continue
+  fi
+  # lead-off
+  if [[ "$line" == LEAD_OFF:* ]]; then
+    printf "\r${YELLOW}  ⚠  LEAD OFF (%s) — check electrodes ${RESET}%-20s" \
+      "${line#LEAD_OFF:}" " "
     continue
   fi
 
-  # strip decimals for integer compare
+  # CSV: take the first raw,rms pair (channel 0)
+  IFS=',' read -ra parts <<< "$line"
+  raw="${parts[0]:-}"
+  rms="${parts[1]:-}"
+  [[ -z "$raw" || -z "$rms" ]] && continue
+
   rms_int=${rms%.*}
   rms_int=${rms_int:-0}
 
@@ -114,6 +127,6 @@ nc "$HOST" "$PORT" | while IFS=',' read -r raw rms; do
     color=$GREEN
   fi
 
-  printf "\r${color}[$(bar $rms_int)]${RESET}  RMS: %5s  RAW: %4s  %s  " \
+  printf "\r${color}[$(bar $rms_int)]${RESET}  CH0  RMS: %5s  RAW: %4s  %s  " \
     "$rms" "$raw" "$state"
 done

@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 SKETCH="$ROOT/firmware/emg_ota"
 BUILD="$ROOT/build"
-FQBN="esp32:esp32:esp32"
-ESPOTA="$HOME/.arduino15/packages/esp32/hardware/esp32/2.0.10/tools/espota.py"
+FQBN="esp32:esp32:esp32c5"
+ESPOTA=$(find "$HOME/.arduino15/packages/esp32/hardware/esp32" -name "espota.py" 2>/dev/null | sort -V | tail -1)
 OTA_HOST="${OTA_HOST:-emg-esp32.local}"
 OTA_PORT=3232
 

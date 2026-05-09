@@ -1,46 +1,36 @@
 #!/usr/bin/env python3
 """
-EMG Live GUI with built-in calibration wizard.
-Reads from emg_api.py  (localhost:5555)
+EMG Live GUI — tkinter + embedded matplotlib
+Reads from emg_api.py (localhost:5555)
 Usage: python3 emg_gui.py [api_host] [api_port]
 """
-import sys, threading, time, collections, json
+import sys, threading, time, collections, json, tkinter as tk
+from tkinter import font as tkfont
 from urllib.request import urlopen, Request
-from urllib.error import URLError
 import matplotlib
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-import matplotlib.patches as mpatches
-from matplotlib.widgets import Button
-from matplotlib.animation import FuncAnimation
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import numpy as np
 
 API_HOST = sys.argv[1] if len(sys.argv) > 1 else "localhost"
 API_PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 5555
 BASE     = f"http://{API_HOST}:{API_PORT}"
-
-WINDOW   = 300   # display samples
-POLL_HZ  = 25
+WINDOW   = 300
 CAL_SECS = 5
+WIN_W, WIN_H = 1200, 740
+BOT_H        = 110
+SIDE_W       = 200
 
 # ── shared state ──────────────────────────────────────────────────────────────
-rms_buf = collections.deque([0.0]    * WINDOW, maxlen=WINDOW)
-raw_buf = collections.deque([2048.0] * WINDOW, maxlen=WINDOW)
-lock    = threading.Lock()
-live    = {"state": "relaxed", "rms": 0.0, "rms_smooth": 0.0,
-           "threshold": 80.0, "connected": False}
-
-# calibration wizard state
-cal = {
-    "active":   False,
-    "step":     0,       # 0=idle 1=await_relaxed 2=recording_relaxed
-                         #        3=await_tense   4=recording_tense 5=done
-    "countdown": 0,
-    "result":   {},
-    "msg":      "",
-    "sub":      "",
-}
+rms_buf  = collections.deque([0.0]    * WINDOW, maxlen=WINDOW)
+raw_buf  = collections.deque([2048.0] * WINDOW, maxlen=WINDOW)
+lock     = threading.Lock()
+live     = {"state": "relaxed", "rms": 0.0, "rms_smooth": 0.0,
+            "threshold": 80.0, "connected": False}
+cal      = {"step": 0, "active": False, "msg": "", "sub": ""}
+drag     = {"active": False, "enabled": False}
 
 # ── API helpers ───────────────────────────────────────────────────────────────
 def api_get(path):
@@ -52,227 +42,317 @@ def api_post(path):
     with urlopen(req, timeout=CAL_SECS + 5) as r:
         return json.loads(r.read())
 
+def set_threshold(val):
+    val = max(0, min(2000, float(val)))
+    threading.Thread(target=lambda: api_post(f"/threshold?value={val:.1f}"),
+                     daemon=True).start()
+    with lock:
+        live["threshold"] = val
+
 # ── poll thread ───────────────────────────────────────────────────────────────
 def poll_loop():
     while True:
         try:
             d = api_get("/live")
             with lock:
+                if drag["active"]:
+                    d.pop("threshold", None)  # keep local value while dragging
                 live.update(d)
-                rms_buf.append(d["rms_smooth"])
-                raw_buf.append(d["raw"])
+                rms_val = d.get("rms_smooth") or d.get("rms", 0)
+                rms_buf.append(rms_val)
+                raw_buf.append(d.get("raw", 2048))
         except Exception:
             with lock:
                 live["connected"] = False
-        time.sleep(1.0 / POLL_HZ)
+        time.sleep(0.04)
 
 threading.Thread(target=poll_loop, daemon=True).start()
 
 # ── calibration thread ────────────────────────────────────────────────────────
+def set_cal(msg, sub=""):
+    with lock:
+        cal["msg"] = msg
+        cal["sub"] = sub
+
 def run_calibration():
-    def set_msg(msg, sub=""):
-        with lock:
-            cal["msg"] = msg
-            cal["sub"] = sub
-
-    def countdown(label):
-        for i in range(CAL_SECS, 0, -1):
-            set_msg(f"Recording {label}…", f"{i}s remaining — hold still")
-            time.sleep(1)
-
     try:
-        # ── Step 1: relaxed ──────────────────────────────────────────────────
         with lock: cal["step"] = 1
-        set_msg("Step 1 of 2: RELAX your arm completely.",
-                "Press  START  when ready")
-
+        set_cal("Step 1 of 2: RELAX your arm.", "Press START when ready")
         while True:
             with lock:
-                if cal["step"] == 2:
-                    break
+                if cal["step"] == 2: break
             time.sleep(0.1)
-
-        set_msg("Relax arm…", f"Recording for {CAL_SECS}s")
         api_post("/calibration/reset")
-        countdown("relaxed")
+        for i in range(CAL_SECS, 0, -1):
+            set_cal("Recording RELAXED…", f"{i}s remaining — keep arm still")
+            time.sleep(1)
         r1 = api_post(f"/record?label=relaxed&seconds={CAL_SECS}")
 
-        # ── Step 2: tense ────────────────────────────────────────────────────
         with lock: cal["step"] = 3
-        set_msg("Step 2 of 2: TENSE arm / make a fist.",
-                "Press  START  when ready")
-
+        set_cal("Step 2 of 2: TENSE arm / make fist.", "Press START when ready")
         while True:
             with lock:
-                if cal["step"] == 4:
-                    break
+                if cal["step"] == 4: break
             time.sleep(0.1)
-
-        set_msg("Tense arm…", f"Recording for {CAL_SECS}s")
-        countdown("tense")
+        for i in range(CAL_SECS, 0, -1):
+            set_cal("Recording TENSE…", f"{i}s remaining — keep tensing")
+            time.sleep(1)
         r2 = api_post(f"/record?label=tense&seconds={CAL_SECS}")
 
-        # ── done ─────────────────────────────────────────────────────────────
         thr = r2.get("suggested_threshold") or live["threshold"]
-        api_post(f"/threshold?value={thr}")
-
+        set_threshold(thr)
         with lock:
-            cal["result"] = {
-                "relaxed_mean": r1["stats"]["rms_mean"],
-                "tense_mean":   r2["stats"]["rms_mean"],
-                "threshold":    thr,
-            }
             cal["step"] = 5
             cal["active"] = False
-
-        set_msg("Calibration saved!",
+        set_cal("Calibration saved!",
                 f"relaxed={r1['stats']['rms_mean']:.0f}  "
                 f"tense={r2['stats']['rms_mean']:.0f}  "
                 f"threshold={thr:.0f}")
-
     except Exception as e:
         with lock:
             cal["step"] = 0
             cal["active"] = False
-        set_msg("Calibration failed", str(e))
+        set_cal("Calibration failed.", str(e))
 
-# ── figure layout ─────────────────────────────────────────────────────────────
-fig = plt.figure(figsize=(13, 8), facecolor="#0d1117")
-fig.canvas.manager.set_window_title("EMG Monitor")
+# ── root window ───────────────────────────────────────────────────────────────
+root = tk.Tk()
+root.title("EMG Monitor")
+root.configure(bg="#0d1117")
+root.geometry(f"{WIN_W}x{WIN_H}")
+root.resizable(False, False)
 
-gs = gridspec.GridSpec(3, 2, hspace=0.5, wspace=0.35,
-     top=0.92, bottom=0.08, left=0.07, right=0.97,
-     height_ratios=[2.5, 2, 2],
-     width_ratios=[2.2, 1])
+FONT_MONO_S  = tkfont.Font(family="monospace", size=8)
+FONT_MONO_M  = tkfont.Font(family="monospace", size=9,  weight="bold")
+FONT_MONO_L  = tkfont.Font(family="monospace", size=18, weight="bold")
+FONT_MONO_XS = tkfont.Font(family="monospace", size=7)
 
-ax_raw   = fig.add_subplot(gs[0, :])    # full width
-ax_rms   = fig.add_subplot(gs[1, :])    # full width
-ax_state = fig.add_subplot(gs[2, 0])    # left: state banner
-ax_cal   = fig.add_subplot(gs[2, 1])    # right: calibration panel
+# ── bottom panel (packed first → always visible) ──────────────────────────────
+bot = tk.Frame(root, bg="#0d1117", height=BOT_H)
+bot.pack(side=tk.BOTTOM, fill=tk.X, padx=6, pady=(0, 6))
+bot.pack_propagate(False)
 
-t = np.arange(WINDOW)
+# state banner
+state_frame = tk.Frame(bot, bg="#166534", width=380, height=BOT_H)
+state_frame.pack(side=tk.LEFT, padx=(0, 8))
+state_frame.pack_propagate(False)
+state_lbl = tk.Label(state_frame, text="relaxed  0",
+    bg="#166534", fg="white", font=FONT_MONO_L)
+state_lbl.place(relx=0.5, rely=0.5, anchor="center")
 
-def style(ax, title, ylim):
-    ax.set_facecolor("#161b22")
-    ax.set_title(title, color="#c9d1d9", fontsize=9, pad=3)
-    ax.set_xlim(0, WINDOW); ax.set_ylim(*ylim)
-    ax.set_xticks([]); ax.tick_params(colors="#8b949e", labelsize=8)
-    for sp in ax.spines.values(): sp.set_color("#30363d")
-    ax.grid(color="#21262d", linewidth=0.5)
+# calibration controls
+cal_frame = tk.Frame(bot, bg="#161b22")
+cal_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-style(ax_raw, "Raw Signal  (ADC)", (0, 4095))
-style(ax_rms, "RMS Envelope  (smoothed)", (0, 700))
+cal_msg_lbl = tk.Label(cal_frame, text="Press CALIBRATE to begin",
+    bg="#161b22", fg="#8b949e", font=FONT_MONO_S)
+cal_msg_lbl.pack(pady=(10, 1))
+cal_sub_lbl = tk.Label(cal_frame, text="", bg="#161b22", fg="#58a6ff",
+    font=FONT_MONO_XS)
+cal_sub_lbl.pack()
 
-line_raw, = ax_raw.plot(t, list(raw_buf), color="#58a6ff", lw=0.7)
-line_rms, = ax_rms.plot(t, list(rms_buf), color="#3fb950", lw=1.1)
-thr_line   = ax_rms.axhline(live["threshold"], color="#f85149",
-                             lw=1.0, ls="--", label="threshold")
-ax_rms.legend(handles=[thr_line], facecolor="#161b22",
-              labelcolor="#c9d1d9", fontsize=8, loc="upper left")
+btn_row = tk.Frame(cal_frame, bg="#161b22")
+btn_row.pack(pady=(4, 0))
 
-# ── state banner ──────────────────────────────────────────────────────────────
-ax_state.set_facecolor("#161b22"); ax_state.axis("off")
-state_patch = mpatches.FancyBboxPatch(
-    (0.02, 0.1), 0.96, 0.8, boxstyle="round,pad=0.02",
-    facecolor="#166534", edgecolor="none", transform=ax_state.transAxes)
-ax_state.add_patch(state_patch)
-state_txt = ax_state.text(0.5, 0.5, "relaxed",
-    ha="center", va="center", fontsize=20, fontweight="bold",
-    color="white", transform=ax_state.transAxes)
-
-# ── calibration panel ─────────────────────────────────────────────────────────
-ax_cal.set_facecolor("#161b22"); ax_cal.axis("off")
-cal_title = ax_cal.text(0.5, 0.92, "CALIBRATION",
-    ha="center", va="top", fontsize=9, fontweight="bold",
-    color="#c9d1d9", transform=ax_cal.transAxes)
-cal_msg = ax_cal.text(0.5, 0.70, "Press CALIBRATE to start",
-    ha="center", va="top", fontsize=8, color="#8b949e",
-    transform=ax_cal.transAxes, wrap=True)
-cal_sub = ax_cal.text(0.5, 0.48, "",
-    ha="center", va="top", fontsize=7.5, color="#58a6ff",
-    transform=ax_cal.transAxes, wrap=True)
-
-# buttons
-ax_btn_cal   = fig.add_axes([0.735, 0.115, 0.115, 0.055])
-ax_btn_start = fig.add_axes([0.860, 0.115, 0.115, 0.055])
-
-btn_cal   = Button(ax_btn_cal,   "CALIBRATE", color="#21262d", hovercolor="#30363d")
-btn_start = Button(ax_btn_start, "START",     color="#0d4a1a", hovercolor="#166534")
-
-for b in (btn_cal, btn_start):
-    b.label.set_color("white")
-    b.label.set_fontsize(8)
-    b.label.set_fontweight("bold")
-
-def on_calibrate(_):
+def on_calibrate():
     with lock:
-        if cal["active"]:
-            return
+        if cal["active"]: return
         cal["active"] = True
         cal["step"]   = 1
-        cal["msg"]    = ""
-        cal["sub"]    = ""
     threading.Thread(target=run_calibration, daemon=True).start()
 
-def on_start(_):
-    with lock:
-        step = cal["step"]
+def on_start():
+    with lock: step = cal["step"]
     if step == 1:
         with lock: cal["step"] = 2
     elif step == 3:
         with lock: cal["step"] = 4
 
-btn_cal.on_clicked(on_calibrate)
-btn_start.on_clicked(on_start)
+def on_reset_cal():
+    threading.Thread(target=lambda: api_post("/calibration/reset"),
+                     daemon=True).start()
+    set_cal("Calibration reset.", "")
 
-fig.suptitle(f"EMG Monitor  ·  {API_HOST}:{API_PORT}",
-             color="#c9d1d9", fontsize=10)
+btn_cal = tk.Button(btn_row, text="CALIBRATE", command=on_calibrate,
+    bg="#21262d", fg="white", activebackground="#30363d",
+    font=FONT_MONO_M, relief=tk.FLAT, padx=10, pady=5, cursor="hand2")
+btn_cal.pack(side=tk.LEFT, padx=(0, 5))
 
-# ── animation ─────────────────────────────────────────────────────────────────
-def update(_):
+btn_start = tk.Button(btn_row, text="START", command=on_start,
+    bg="#0d4a1a", fg="white", activebackground="#166534",
+    font=FONT_MONO_M, relief=tk.FLAT, padx=14, pady=5, cursor="hand2")
+btn_start.pack(side=tk.LEFT, padx=(0, 5))
+
+btn_reset = tk.Button(btn_row, text="RESET CAL", command=on_reset_cal,
+    bg="#3a1a1a", fg="#f85149", activebackground="#5a2a2a",
+    font=FONT_MONO_M, relief=tk.FLAT, padx=10, pady=5, cursor="hand2")
+btn_reset.pack(side=tk.LEFT)
+
+# ── side panel (right) ────────────────────────────────────────────────────────
+side = tk.Frame(root, bg="#161b22", width=SIDE_W)
+side.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 6), pady=(6, 0))
+side.pack_propagate(False)
+
+tk.Label(side, text="THRESHOLD", bg="#161b22", fg="#c9d1d9",
+    font=FONT_MONO_M).pack(pady=(14, 4))
+
+thr_val_lbl = tk.Label(side, text="80", bg="#161b22", fg="#f85149",
+    font=tkfont.Font(family="monospace", size=22, weight="bold"))
+thr_val_lbl.pack()
+
+tk.Label(side, text="manual input:", bg="#161b22", fg="#8b949e",
+    font=FONT_MONO_XS).pack(pady=(10, 2))
+
+thr_entry = tk.Entry(side, width=8, justify="center",
+    bg="#21262d", fg="white", insertbackground="white",
+    font=FONT_MONO_M, relief=tk.FLAT)
+thr_entry.pack()
+
+def on_set_thr():
+    try:
+        val = float(thr_entry.get())
+        set_threshold(val)
+    except ValueError:
+        pass
+
+tk.Button(side, text="SET", command=on_set_thr,
+    bg="#21262d", fg="white", activebackground="#30363d",
+    font=FONT_MONO_M, relief=tk.FLAT, padx=8, pady=4,
+    cursor="hand2").pack(pady=(4, 0))
+
+tk.Frame(side, bg="#30363d", height=1).pack(fill=tk.X, padx=10, pady=14)
+
+tk.Label(side, text="drag threshold line:", bg="#161b22", fg="#8b949e",
+    font=FONT_MONO_XS).pack(pady=(0, 4))
+
+drag_btn_text = tk.StringVar(value="DRAG  OFF")
+drag_btn_color = {"bg": "#21262d"}
+
+def on_toggle_drag():
+    drag["enabled"] = not drag["enabled"]
+    if drag["enabled"]:
+        drag_btn_text.set("DRAG  ON ")
+        drag_toggle_btn.configure(bg="#0d4a1a")
+    else:
+        drag_btn_text.set("DRAG  OFF")
+        drag_toggle_btn.configure(bg="#21262d")
+
+drag_toggle_btn = tk.Button(side, textvariable=drag_btn_text,
+    command=on_toggle_drag,
+    bg="#21262d", fg="white", activebackground="#30363d",
+    font=FONT_MONO_M, relief=tk.FLAT, padx=8, pady=4, cursor="hand2")
+drag_toggle_btn.pack()
+
+tk.Label(side, text="(click & drag red line\nin RMS plot)",
+    bg="#161b22", fg="#555d68", font=FONT_MONO_XS,
+    justify="center").pack(pady=(4, 0))
+
+# ── matplotlib figure ─────────────────────────────────────────────────────────
+plot_w = WIN_W - SIDE_W - 18
+FIG_H  = (WIN_H - BOT_H - 20) / 100
+fig    = plt.figure(figsize=(plot_w / 100, FIG_H), facecolor="#0d1117")
+gs     = gridspec.GridSpec(2, 1, hspace=0.45,
+         top=0.93, bottom=0.09, left=0.07, right=0.98)
+
+ax_raw = fig.add_subplot(gs[0])
+ax_rms = fig.add_subplot(gs[1])
+t      = np.arange(WINDOW)
+
+for ax, title, ylim in [
+    (ax_raw, "Raw Signal  (ADC)",       (0, 4095)),
+    (ax_rms, "RMS Envelope (smoothed)", (0, 700)),
+]:
+    ax.set_facecolor("#161b22")
+    ax.set_title(title, color="#c9d1d9", fontsize=9, pad=3)
+    ax.set_xlim(0, WINDOW); ax.set_ylim(*ylim)
+    ax.set_xticks([])
+    ax.tick_params(colors="#8b949e", labelsize=8)
+    for sp in ax.spines.values(): sp.set_color("#30363d")
+    ax.grid(color="#21262d", linewidth=0.5)
+
+line_raw, = ax_raw.plot(t, list(raw_buf), color="#58a6ff", lw=0.7)
+line_rms, = ax_rms.plot(t, list(rms_buf), color="#3fb950", lw=1.1)
+thr_line   = ax_rms.axhline(80, color="#f85149", lw=1.5, ls="--",
+                             label="threshold", picker=6)
+
+canvas = FigureCanvasTkAgg(fig, master=root)
+canvas.get_tk_widget().pack(side=tk.LEFT, fill=tk.BOTH, expand=True,
+                            padx=(6, 2), pady=(6, 2))
+
+# ── threshold line drag ───────────────────────────────────────────────────────
+def on_press(event):
+    if not drag["enabled"] or event.inaxes != ax_rms: return
+    thr = live.get("threshold", 80)
+    # click within 15 px of threshold line → start drag
+    _, y_disp = ax_rms.transData.transform((0, thr))
+    if abs(event.y - y_disp) < 15:
+        drag["active"] = True
+
+def on_motion(event):
+    if not drag["active"] or event.inaxes != ax_rms: return
+    y_data = max(0, min(700, event.ydata or 0))
     with lock:
-        raw  = list(raw_buf)
-        rms  = list(rms_buf)
-        s    = dict(live)
-        step = cal["step"]
-        msg  = cal["msg"]
-        sub  = cal["sub"]
+        live["threshold"] = y_data
 
-    line_raw.set_ydata(raw)
-    line_rms.set_ydata(rms)
-    thr_line.set_ydata([s["threshold"], s["threshold"]])
+def on_release(event):
+    if drag["active"]:
+        drag["active"] = False
+        thr = live.get("threshold", 80)
+        set_threshold(thr)
 
-    # state banner
-    if not s["connected"]:
-        state_patch.set_facecolor("#21262d")
-        state_txt.set_text("NO CONNECTION")
-        state_txt.set_fontsize(14)
-    elif s["state"] == "lead_off":
-        state_patch.set_facecolor("#6e4018")
-        state_txt.set_text("LEAD OFF")
-        state_txt.set_fontsize(18)
-    elif s["state"] == "tense":
-        state_patch.set_facecolor("#b91c1c")
-        state_txt.set_text(f"ACTIVE\n{s['rms_smooth']:.0f}")
-        state_txt.set_fontsize(20)
-    else:
-        state_patch.set_facecolor("#166534")
-        state_txt.set_text(f"relaxed\n{s['rms_smooth']:.0f}")
-        state_txt.set_fontsize(18)
+canvas.mpl_connect("button_press_event",   on_press)
+canvas.mpl_connect("motion_notify_event",  on_motion)
+canvas.mpl_connect("button_release_event", on_release)
 
-    # calibration panel text
-    if step == 0 and not msg:
-        cal_msg.set_text("Press CALIBRATE to start")
-        cal_sub.set_text("")
-    else:
-        cal_msg.set_text(msg)
-        cal_sub.set_text(sub)
+# ── refresh loop ──────────────────────────────────────────────────────────────
+STATE_COLORS = {
+    "tense":    "#b91c1c",
+    "relaxed":  "#166534",
+    "lead_off": "#6e4018",
+    "no_conn":  "#21262d",
+}
 
-    # START button color: only active during await steps
-    if step in (1, 3):
-        btn_start.ax.set_facecolor("#0d4a1a")
-    else:
-        btn_start.ax.set_facecolor("#161b22")
+def refresh():
+    try:
+        with lock:
+            raw  = list(raw_buf)
+            rms  = list(rms_buf)
+            s    = dict(live)
+            step = cal["step"]
+            msg  = cal["msg"]
+            sub  = cal["sub"]
 
-ani = FuncAnimation(fig, update, interval=40, blit=False, cache_frame_data=False)
-plt.show()
+        thr = s.get("threshold", 80)
+
+        line_raw.set_ydata(raw)
+        line_rms.set_ydata(rms)
+        thr_line.set_ydata([thr, thr])
+        canvas.draw_idle()
+
+        # state banner
+        rms_val = s.get("rms_smooth") or s.get("rms", 0)
+        if not s["connected"]:
+            color, label = STATE_COLORS["no_conn"], "NO CONNECTION"
+        elif s.get("state") == "lead_off":
+            color, label = STATE_COLORS["lead_off"], "LEAD OFF"
+        elif s.get("state") == "tense":
+            color, label = STATE_COLORS["tense"], f"ACTIVE  {rms_val:.0f}"
+        else:
+            color, label = STATE_COLORS["relaxed"], f"relaxed  {rms_val:.0f}"
+        state_frame.configure(bg=color)
+        state_lbl.configure(bg=color, text=label)
+
+        # side panel threshold value
+        thr_val_lbl.configure(text=f"{thr:.0f}")
+
+        # calibration text + button states
+        cal_msg_lbl.configure(text=msg or "Press CALIBRATE to begin")
+        cal_sub_lbl.configure(text=sub)
+        btn_start.configure(bg="#0d4a1a" if step in (1, 3) else "#21262d")
+
+    except Exception:
+        pass
+    finally:
+        root.after(60, refresh)
+
+root.after(200, refresh)
+root.mainloop()

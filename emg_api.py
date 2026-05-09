@@ -15,6 +15,7 @@ Start: python3 emg_api.py [esp_host] [esp_port] [api_port] [bind_host]
 """
 import sys, os, socket, threading, time, json, statistics
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
 from collections import deque
 
@@ -228,4 +229,7 @@ if __name__ == "__main__":
     print("  GET  /calibration")
     print("  POST /calibration/reset")
     print("  POST /threshold?value=80\n")
-    HTTPServer((API_BIND, API_PORT), Handler).serve_forever()
+    class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+        daemon_threads = True
+
+    ThreadedHTTPServer((API_BIND, API_PORT), Handler).serve_forever()

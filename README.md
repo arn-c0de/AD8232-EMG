@@ -1,8 +1,22 @@
 # AD8232 EMG — ESP32 + OTA
 
+![Firmware: ESP32](https://img.shields.io/badge/Firmware-ESP32-0f766e)
+![Signal Path: AD8232 to WiFi TCP](https://img.shields.io/badge/Signal%20Path-AD8232%20%E2%86%92%20WiFi%20TCP-1d4ed8)
+![Backend: Python Stdlib API](https://img.shields.io/badge/Backend-Python%20stdlib%20API-2563eb)
+![GUI: Tkinter and Matplotlib](https://img.shields.io/badge/GUI-Tkinter%20%2B%20Matplotlib-7c3aed)
+![Updates: OTA Preferred](https://img.shields.io/badge/Updates-OTA%20preferred-ca8a04)
+
 Single-channel surface EMG from the forearm using an AD8232 module and ESP32.
 Data streams over WiFi to a Python GUI. The ESP32 runs on a USB powerbank;
 flashing is done wirelessly via OTA after the first USB flash.
+
+## Maintainer
+
+`arn-c0de@protonmail.com`
+
+## Safety
+
+Use OTA for normal firmware updates whenever possible. Avoid connecting the EMG setup directly to a PC over USB while it is attached to the body, because ground faults, wiring mistakes, or accidental shorts can create an unnecessary safety risk. Use USB only for the initial flash and prefer battery-powered operation during measurements.
 
 ---
 
@@ -48,6 +62,11 @@ Palm facing UP — inner forearm
 > aligned **along** the muscle fiber direction.
 > Clean skin with alcohol before attaching for better contact.
 
+In practice:
+- `YELLOW (LA+)`: place it first on the inner forearm over the main muscle belly, closer to the elbow.
+- `RED (RA-)`: place it on the same line a little closer to the wrist, about 2 to 3 cm away from the yellow electrode.
+- `GREEN (RL)`: place it on a bony reference point near the wrist, not on the active muscle.
+
 ---
 
 ## Setup
@@ -63,12 +82,15 @@ cp .env.example .env
 ./flash.sh
 ```
 
+Use USB for the first flash only, with the electrodes disconnected from the body.
+
 ### 3. All subsequent flashes (OTA — powerbank only)
 ```bash
 ./flash.sh
 ```
 
 `flash.sh` auto-detects: ESP32 reachable via WiFi → OTA, otherwise → USB fallback.
+OTA is the recommended update path for safety.
 
 Override OTA host:
 ```bash
@@ -86,6 +108,8 @@ python3 emg_api.py
 # terminal 2 — monitor + auto-launch GUI
 ./monitor.sh
 ```
+
+`monitor.sh` starts the local API automatically on `127.0.0.1:5555` if it is not already running, then launches the GUI.
 
 Or launch GUI standalone (requires API server running):
 ```bash
@@ -131,7 +155,7 @@ AD8232-EMG/
 ├── gui/
 │   └── emg_gui.py          live GUI with built-in calibration wizard
 ├── emg_api.py              HTTP REST API server (stdlib only, no pip)
-├── monitor.sh              terminal monitor + auto-starts GUI
+├── monitor.sh              terminal monitor + auto-starts local API + GUI
 ├── flash.sh                compile + OTA/USB upload
 ├── .env                    WiFi credentials (gitignored)
 ├── .env.example            credential template

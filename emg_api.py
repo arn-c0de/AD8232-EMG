@@ -339,6 +339,19 @@ def find_channel(idx: int) -> dict | None:
     return None
 
 
+def legacy_single_channel_path(path: str) -> tuple[int, str | None] | None:
+    """Map pre-multichannel routes to channel 0 for backward compatibility."""
+    if path == "/threshold":
+        return 0, "threshold"
+    if path == "/record":
+        return 0, "record"
+    if path == "/calibration":
+        return 0, "calibration"
+    if path == "/calibration/reset":
+        return 0, "calibration/reset"
+    return None
+
+
 class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):  # silence per-request stderr
@@ -348,6 +361,26 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         url = urlparse(self.path)
         path = url.path
+
+        if path in ("/", "/favicon.ico"):
+            with lock:
+                ch_list = [{"id": c["id"], "label": c["label"]} for c in channels]
+            return json_response(self, 200, {
+                "service":   "EMG API",
+                "connected": connected["value"],
+                "channels":  ch_list,
+                "endpoints": [
+                    "GET  /live",
+                    "GET  /channels",
+                    "GET  /channel/<id>",
+                    "GET  /channel/<id>/threshold",
+                    "GET  /channel/<id>/calibration",
+                    "POST /channel/<id>/threshold?value=80",
+                    "POST /channel/<id>/record?label=relaxed&seconds=5",
+                    "POST /channel/<id>/calibration/reset",
+                    "POST /calibration/reset",
+                ],
+            })
 
         if path == "/live":
             with lock:
@@ -363,8 +396,14 @@ class Handler(BaseHTTPRequestHandler):
             return json_response(self, 200, data)
 
         m = CHANNEL_PATH_RE.match(path)
-        if m:
+        legacy = legacy_single_channel_path(path)
+        if not m and legacy is not None:
+            idx, sub = legacy
+        elif m:
             idx, sub = int(m.group(1)), m.group(2)
+        else:
+            idx, sub = None, None
+        if idx is not None:
             ch = find_channel(idx)
             if ch is None:
                 return json_response(self, 404, {"error": f"channel {idx} not found"})
@@ -393,8 +432,15 @@ class Handler(BaseHTTPRequestHandler):
             return json_response(self, 200, {"status": "cleared"})
 
         m = CHANNEL_PATH_RE.match(path)
-        if m:
+        legacy = legacy_single_channel_path(path)
+        if not m and legacy is not None:
+            idx, sub = legacy
+        elif m:
             idx, sub = int(m.group(1)), m.group(2)
+        else:
+            idx, sub = None, None
+
+        if idx is not None:
             if find_channel(idx) is None:
                 return json_response(self, 404, {"error": f"channel {idx} not found"})
 

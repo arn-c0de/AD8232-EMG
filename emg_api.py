@@ -36,7 +36,7 @@ state = {
     "connected": False,
     "tense_until": 0.0,   # hold tense state until this timestamp
 }
-SMOOTH_ALPHA  = 0.3    # exponential smoothing (0=none, 1=raw)
+SMOOTH_ALPHA  = 0.15   # light smoothing — firmware HP+DC filter handles heavy lifting
 HOLD_MS       = 400    # keep "tense" for at least this long after peak
 calibration = {}
 

@@ -9,11 +9,20 @@ WiFiClient tcpClient;
 const int SAMPLES_PER_WINDOW = (SAMPLE_RATE_HZ * RMS_WINDOW_MS) / 1000;
 const unsigned long SAMPLE_INTERVAL_US = 1000000UL / SAMPLE_RATE_HZ;
 
+// DC tracker: very slow EMA removes electrode offset + long-term drift
+// HP filter:  removes motion artifacts and low-freq noise below ~20 Hz
+// Both run before RMS so only true muscle signal enters the window.
+const float DC_ALPHA = 0.0005f;                  // ~2 Hz tracker
+const float HP_ALPHA = 1.0f / (1.0f + (float)(2.0f * 3.14159f * 20.0f / SAMPLE_RATE_HZ));
+
 unsigned long lastSampleUs   = 0;
 unsigned long lastLeadOffUs  = 0;
+float dcLevel    = 2048.0f;
+float hpPrevIn   = 0.0f;
+float hpPrevOut  = 0.0f;
 float rmsBuffer[SAMPLES_PER_WINDOW];
 int   bufferIndex = 0;
-long  bufferSum   = 0;
+float bufferSumF  = 0.0f;
 
 void setup() {
   Serial.begin(115200);
@@ -67,14 +76,22 @@ void loop() {
 
   int raw = analogRead(EMG_OUT_PIN);  // 0–4095 (12-bit)
 
-  // running RMS over window
-  int centered = raw - 2048;
-  bufferSum -= (long)(rmsBuffer[bufferIndex] * rmsBuffer[bufferIndex]);
-  rmsBuffer[bufferIndex] = (float)centered;
-  bufferSum += centered * centered;
-  bufferIndex = (bufferIndex + 1) % SAMPLES_PER_WINDOW;
+  // 1. Adaptive DC removal — tracks slow electrode drift
+  dcLevel   += DC_ALPHA * (raw - dcLevel);
+  float centered = raw - dcLevel;
 
-  float rms = sqrt((float)bufferSum / SAMPLES_PER_WINDOW);
+  // 2. High-pass IIR at ~20 Hz — removes motion artifacts
+  float hpOut = HP_ALPHA * (hpPrevOut + centered - hpPrevIn);
+  hpPrevIn  = centered;
+  hpPrevOut = hpOut;
+
+  // 3. Running RMS on filtered signal
+  bufferSumF -= rmsBuffer[bufferIndex] * rmsBuffer[bufferIndex];
+  rmsBuffer[bufferIndex] = hpOut;
+  bufferSumF += hpOut * hpOut;
+  bufferIndex  = (bufferIndex + 1) % SAMPLES_PER_WINDOW;
+
+  float rms = sqrtf(bufferSumF / SAMPLES_PER_WINDOW);
 
   // CSV: raw,rms
   char line[32];

@@ -12,5 +12,5 @@
 
 // Sampling
 #define SAMPLE_RATE_HZ  1000
-#define RMS_WINDOW_MS   200    // wider window = smoother envelope
+#define RMS_WINDOW_MS   100    // 100ms: responsive detection, low latency
 #define TCP_PORT        8888

@@ -6,6 +6,10 @@
 ![GUI: Tkinter and Matplotlib](https://img.shields.io/badge/GUI-Tkinter%20%2B%20Matplotlib-7c3aed)
 ![Updates: OTA Preferred](https://img.shields.io/badge/Updates-OTA%20preferred-ca8a04)
 
+## Safety
+
+Use OTA for normal firmware updates whenever possible. Avoid connecting the EMG setup directly to a PC over USB while it is attached to the body, because ground faults, wiring mistakes, or accidental shorts can create an unnecessary safety risk. Use USB only for the initial flash and prefer battery-powered operation during measurements.
+
 Single-channel surface EMG from the forearm using an AD8232 module and ESP32.
 Data streams over WiFi to a Python GUI. The ESP32 runs on a USB powerbank;
 flashing is done wirelessly via OTA after the first USB flash.
@@ -13,10 +17,6 @@ flashing is done wirelessly via OTA after the first USB flash.
 ## Maintainer
 
 `arn-c0de@protonmail.com`
-
-## Safety
-
-Use OTA for normal firmware updates whenever possible. Avoid connecting the EMG setup directly to a PC over USB while it is attached to the body, because ground faults, wiring mistakes, or accidental shorts can create an unnecessary safety risk. Use USB only for the initial flash and prefer battery-powered operation during measurements.
 
 ---
 

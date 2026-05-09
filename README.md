@@ -15,7 +15,7 @@ Single-channel surface EMG from the forearm using an AD8232 module and ESP32.
 Data streams over WiFi to a Python GUI. The ESP32 runs on a USB powerbank;
 flashing is done wirelessly via OTA after the first USB flash.
 
-See also: [Single-Channel EMG Guide](docs/SINGLE_CHANNEL_EMG_PLACEMENT_GUIDE.md) · [Multi-Channel EMG Guide](docs/MULTI_CHANNEL_EMG_GESTURE_GUIDE.md) · [Changelog](CHANGELOG.md) · [API Reference](API.md) · [License](LICENSE)
+See also: [Roadmap](docs/ROADMAP.md) · [Single-Channel EMG Guide](docs/SINGLE_CHANNEL_EMG_PLACEMENT_GUIDE.md) · [Multi-Channel EMG Guide](docs/MULTI_CHANNEL_EMG_GESTURE_GUIDE.md) · [Changelog](CHANGELOG.md) · [API Reference](API.md) · [License](LICENSE)
 
 ![EMG Monitor GUI](images/main-gui.png)
 

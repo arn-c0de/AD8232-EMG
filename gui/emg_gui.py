@@ -240,7 +240,7 @@ def update(_):
 
     line_raw.set_ydata(raw)
     line_rms.set_ydata(rms)
-    thr_line.set_ydata(s["threshold"])
+    thr_line.set_ydata([s["threshold"], s["threshold"]])
 
     # state banner
     if not s["connected"]:

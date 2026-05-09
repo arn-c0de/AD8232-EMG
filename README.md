@@ -23,51 +23,62 @@ See also: [Roadmap](docs/ROADMAP.md) · [Single-Channel EMG Guide](docs/SINGLE_C
 
 ![EMG Monitor GUI](images/main-gui.png)
 
-## Wiring — 2× AD8232 → ESP32
+## Wiring — 2× AD8232 → ESP32-C5 WROOM
 
 Each AD8232 module connects to 3V3, GND, SDN (tied high) and three GPIOs.
-The current two-channel configuration:
+The current two-channel configuration for the **ESP32-C5 WROOM**:
 
 ```
-AD8232 (CH0 — FCR, flexor)    ESP32
-──────────────────────────    ──────────────────────────────────────
-3.3V    ─────────────────── 3.3V       (shared rail)
-GND     ─────────────────── GND        (shared rail)
-OUTPUT  ─────────────────── GPIO 34    (ADC1_CH6  — EMG signal CH0)
-LO+     ─────────────────── GPIO 16    (lead-off detect +, CH0)
-LO-     ─────────────────── GPIO 17    (lead-off detect −, CH0)
-SDN     ─────────────────── 3.3V       (always on)
+AD8232 (CH0 — FCR, flexor)       ESP32-C5 WROOM
+─────────────────────────────    ──────────────────────────────────────
+3.3V    ──────────────────────── 3.3V       (shared rail)
+GND     ──────────────────────── GND        (shared rail)
+OUTPUT  ──────────────────────── GPIO 0     (ADC1_CH0 — EMG signal CH0)
+LO+     ──────────────────────── GPIO 6     (lead-off detect +, CH0)
+LO-     ──────────────────────── GPIO 7     (lead-off detect −, CH0)
+SDN     ──────────────────────── 3.3V       (always on)
 
-AD8232 (CH1 — ED, extensor)   ESP32
-──────────────────────────    ──────────────────────────────────────
-3.3V    ─────────────────── 3.3V       (shared rail)
-GND     ─────────────────── GND        (shared rail)
-OUTPUT  ─────────────────── GPIO 35    (ADC1_CH7  — EMG signal CH1)
-LO+     ─────────────────── GPIO 18    (lead-off detect +, CH1)
-LO-     ─────────────────── GPIO 19    (lead-off detect −, CH1)
-SDN     ─────────────────── 3.3V       (always on)
+AD8232 (CH1 — ED, extensor)      ESP32-C5 WROOM
+─────────────────────────────    ──────────────────────────────────────
+3.3V    ──────────────────────── 3.3V       (shared rail)
+GND     ──────────────────────── GND        (shared rail)
+OUTPUT  ──────────────────────── GPIO 1     (ADC1_CH1 — EMG signal CH1)
+LO+     ──────────────────────── GPIO 8     (lead-off detect +, CH1)
+LO-     ──────────────────────── GPIO 9     (lead-off detect −, CH1)
+SDN     ──────────────────────── 3.3V       (always on)
 ```
 
-**ADC1 pins only for OUTPUT** — ADC2 (GPIO 0/2/4/12–15/25–27) does not work
-while WiFi is active. Valid ADC1 pins: GPIO 32, 33, 34, 35, 36, 39.
-`LO+` / `LO-` accept any free GPIO.
+**ESP32-C5 ADC constraint:** only ADC1 pins (GPIO 0–6) work while WiFi is
+active. Never wire AD8232 OUTPUT to any other GPIO. `LO+` / `LO-` are digital
+inputs and accept any free GPIO.
 
 ### Adding or removing modules
 
 Edit `firmware/emg_ota/config.h`. One row = one module. Update `NUM_CHANNELS`
-to match. Re-flash. The API and GUI discover the new layout automatically from
-the stream header — no Python code changes needed.
+to match. Re-flash. The API and GUI discover the new layout automatically.
 
 ```cpp
 #define NUM_CHANNELS 2   // ← change this number
 
 static const ChannelPins CHANNELS[NUM_CHANNELS] = {
-    { 34, 16, 17, "FCR" },   // CH0 — forearm flexor   (palm-up,   near elbow)
-    { 35, 18, 19, "ED"  },   // CH1 — forearm extensor (palm-down, near elbow)
- // { 36, 21, 22, "FCU" },   // CH2 — ulnar flexor              (uncomment to add)
- // { 39, 23, 25, "BRD" },   // CH3 — brachioradialis / radials (uncomment to add)
+    {  0,  6,  7, "FCR" },   // CH0 — forearm flexor   (palm-up,   near elbow)
+    {  1,  8,  9, "ED"  },   // CH1 — forearm extensor (palm-down, near elbow)
+ // {  2, 10, 11, "FCU" },   // CH2 — ulnar flexor              (uncomment to add)
+ // {  3, 12, 13, "BRD" },   // CH3 — brachioradialis / radials (uncomment to add)
 };
 ```
+
+### Full ADC1 pin reference (ESP32-C5)
+
+| Channel | GPIO | Use |
+|---------|------|-----|
+| ADC1_CH0 | GPIO 0 | CH0 OUTPUT |
+| ADC1_CH1 | GPIO 1 | CH1 OUTPUT |
+| ADC1_CH2 | GPIO 2 | CH2 OUTPUT (future) |
+| ADC1_CH3 | GPIO 3 | CH3 OUTPUT (future) |
+| ADC1_CH4 | GPIO 4 | spare |
+| ADC1_CH5 | GPIO 5 | spare |
+| ADC1_CH6 | GPIO 6 | spare (here used as LO+ CH0) |
 
 ---
 

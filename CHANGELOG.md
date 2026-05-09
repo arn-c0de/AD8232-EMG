@@ -4,6 +4,17 @@ All notable changes to this project are documented here.
 
 ---
 
+## [1.1.1] — 2026-05-09
+
+### Hardware target — ESP32-C5 WROOM
+
+- **`config.h`**: pin assignments migrated to ESP32-C5 WROOM layout — CH0 `OUT=GPIO 0 / LO+=GPIO 6 / LO-=GPIO 7`, CH1 `OUT=GPIO 1 / LO+=GPIO 8 / LO-=GPIO 9`. ADC1 (GPIO 0–6) is the only ADC safe to use while WiFi is active on C5.
+- **`flash.sh`**: FQBN changed from `esp32:esp32:esp32` to `esp32:esp32:esp32c5`; `espota.py` path is now resolved dynamically from the newest installed core version (supports arduino-esp32 3.x).
+- **Core**: upgraded arduino-esp32 from 2.0.10 to 3.3.8 — required for ESP32-C5 support. ESP32-C3/classic ESP32 users should pin their core version.
+- **`README.md`**: wiring tables and ADC pin reference rewritten for ESP32-C5.
+
+---
+
 ## [1.1.0] — 2026-05-09
 
 ### Architecture — modular multi-channel support

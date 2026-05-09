@@ -11,17 +11,26 @@
 #define RMS_WINDOW_MS   100      // 100 ms: low-latency muscle onset detection
 #define TCP_PORT        8888
 
-// ── Channels ─────────────────────────────────────────────────────────────────
+// ── Channels — ESP32-C5 WROOM pin layout ─────────────────────────────────────
 // Each row defines one AD8232 module. Add or remove rows to scale the system,
 // then update NUM_CHANNELS to match.
 //
-//   out      — AD8232 OUTPUT  → ESP32 ADC1 input (GPIO 32, 33, 34, 35, 36, 39)
+//   out      — AD8232 OUTPUT  → ADC1-capable GPIO (ESP32-C5: GPIO 0–6)
 //   lo_plus  — AD8232 LO+     → any free GPIO (lead-off detect, digital input)
 //   lo_minus — AD8232 LO-     → any free GPIO
 //   label    — short tag shown in the stream header, REST API and GUI
 //
-// NOTE: ESP32 ADC2 pins (GPIO 0/2/4/12-15/25-27) do NOT work while WiFi is
-//       active — always wire AD8232 OUTPUT to an ADC1 pin.
+// ESP32-C5 ADC note:
+//   ADC1 channels (safe with WiFi active): GPIO 0–6  (ADC1_CH0–CH6)
+//   ADC2 channels are unusable while WiFi is on — do NOT use them for OUTPUT.
+//   LO+ / LO- are digital inputs; any free GPIO works.
+//
+// ESP32-C5-WROOM-1 suggested layout (2 channels, 4-channel template below):
+//
+//   CH0  FCR  OUT=GPIO 0 (ADC1_CH0)  LO+=GPIO 6   LO-=GPIO 7
+//   CH1  ED   OUT=GPIO 1 (ADC1_CH1)  LO+=GPIO 8   LO-=GPIO 9
+//   CH2  FCU  OUT=GPIO 2 (ADC1_CH2)  LO+=GPIO 10  LO-=GPIO 11  (future)
+//   CH3  BRD  OUT=GPIO 3 (ADC1_CH3)  LO+=GPIO 12  LO-=GPIO 13  (future)
 
 #define NUM_CHANNELS 2
 
@@ -33,8 +42,8 @@ struct ChannelPins {
 };
 
 static const ChannelPins CHANNELS[NUM_CHANNELS] = {
-    { 34, 16, 17, "FCR" },   // CH0 — forearm flexor   (palm-up,   near elbow)
-    { 35, 18, 19, "ED"  },   // CH1 — forearm extensor (palm-down, near elbow)
- // { 36, 21, 22, "FCU" },   // CH2 — ulnar flexor
- // { 39, 23, 25, "BRD" },   // CH3 — brachioradialis / radial extensors
+    {  0,  6,  7, "FCR" },   // CH0 — forearm flexor   (palm-up,   near elbow)
+    {  1,  8,  9, "ED"  },   // CH1 — forearm extensor (palm-down, near elbow)
+ // {  2, 10, 11, "FCU" },   // CH2 — ulnar flexor
+ // {  3, 12, 13, "BRD" },   // CH3 — brachioradialis / radial extensors
 };

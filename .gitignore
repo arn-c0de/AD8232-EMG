@@ -1,0 +1,15 @@
+.env
+build/
+firmware/emg_ota/secrets.h
+calibration.json
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.idea/
+.vscode/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.log
+.DS_Store

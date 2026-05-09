@@ -114,7 +114,9 @@ def poll_loop() -> None:
                     if i >= len(raw_bufs):
                         break
                     raw_bufs[i].append(snap.get("raw", 2048))
-                    rms_bufs[i].append(snap.get("rms_smooth") or snap.get("rms", 0))
+                    # Plot the live RMS envelope, not the extra-smoothed value used
+                    # for classification, otherwise short contractions look muted.
+                    rms_bufs[i].append(snap.get("rms", 0))
 
                 # Keep latest snapshots, but suppress threshold updates while
                 # the user is actively dragging a channel's threshold line.
@@ -435,6 +437,12 @@ def style_axis(ax, title: str, ylim: tuple) -> None:
     ax.grid(color="#21262d", linewidth=0.5)
 
 
+def rms_ylim(values: list[float], threshold: float) -> tuple[float, float]:
+    peak = max([threshold, 50.0] + values[-WINDOW:])
+    top = min(2000.0, max(120.0, peak * 1.25))
+    return (0.0, top)
+
+
 def rebuild_figure() -> None:
     global ax_raw, ax_rms_list, line_raw_list, line_rms_list, thr_lines
 
@@ -548,6 +556,8 @@ def refresh() -> None:
             for i, line in enumerate(line_rms_list):
                 if i < len(rms_lists):
                     line.set_ydata(rms_lists[i])
+                    thr = snap[i]["threshold"] if i < len(snap) else 80.0
+                    ax_rms_list[i].set_ylim(*rms_ylim(rms_lists[i], thr))
             for i, thr_line in enumerate(thr_lines):
                 if i < len(snap):
                     thr_line.set_ydata([snap[i]["threshold"]] * 2)

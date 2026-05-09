@@ -66,12 +66,17 @@ static float processSample(int idx, int raw) {
     c.bufferSum += hpOut * hpOut;
     c.bufferIndex = (c.bufferIndex + 1) % SAMPLES_PER_WINDOW;
 
-    return sqrtf(c.bufferSum / SAMPLES_PER_WINDOW);
+    // fmaxf guards against tiny negative drift from float accumulation → NaN
+    return sqrtf(fmaxf(0.0f, c.bufferSum) / SAMPLES_PER_WINDOW);
 }
 
 // ── Setup ────────────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
+
+    // Full 3.3 V ADC range — arduino-esp32 3.x defaults to ADC_0db (0–1 V)
+    // which clips the AD8232 signal (centered at ~1.65 V).
+    analogSetAttenuation(ADC_11db);
 
     for (int i = 0; i < NUM_CHANNELS; i++) {
         pinMode(CHANNELS[i].lo_plus,  INPUT);

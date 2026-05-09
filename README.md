@@ -33,7 +33,7 @@ AD8232 (CH0 — FCR, flexor)       ESP32-C5 WROOM
 ─────────────────────────────    ──────────────────────────────────────
 3.3V    ──────────────────────── 3.3V       (shared rail)
 GND     ──────────────────────── GND        (shared rail)
-OUTPUT  ──────────────────────── GPIO 0     (ADC1_CH0 — EMG signal CH0)
+OUTPUT  ──────────────────────── GPIO 4     (ADC1_CH4 — EMG signal CH0)
 LO+     ──────────────────────── GPIO 6     (lead-off detect +, CH0)
 LO-     ──────────────────────── GPIO 7     (lead-off detect −, CH0)
 SDN     ──────────────────────── 3.3V       (always on)
@@ -42,11 +42,14 @@ AD8232 (CH1 — ED, extensor)      ESP32-C5 WROOM
 ─────────────────────────────    ──────────────────────────────────────
 3.3V    ──────────────────────── 3.3V       (shared rail)
 GND     ──────────────────────── GND        (shared rail)
-OUTPUT  ──────────────────────── GPIO 1     (ADC1_CH1 — EMG signal CH1)
+OUTPUT  ──────────────────────── GPIO 5     (ADC1_CH5 — EMG signal CH1)
 LO+     ──────────────────────── GPIO 8     (lead-off detect +, CH1)
 LO-     ──────────────────────── GPIO 9     (lead-off detect −, CH1)
 SDN     ──────────────────────── 3.3V       (always on)
 ```
+
+> GPIO 0–3 avoided for ADC output: GPIO 0 carries a BOOT pull-down on most
+> dev boards which corrupts readings.
 
 **ESP32-C5 ADC constraint:** only ADC1 pins (GPIO 0–6) work while WiFi is
 active. Never wire AD8232 OUTPUT to any other GPIO. `LO+` / `LO-` are digital
@@ -72,13 +75,13 @@ static const ChannelPins CHANNELS[NUM_CHANNELS] = {
 
 | Channel | GPIO | Use |
 |---------|------|-----|
-| ADC1_CH0 | GPIO 0 | CH0 OUTPUT |
-| ADC1_CH1 | GPIO 1 | CH1 OUTPUT |
+| ADC1_CH0 | GPIO 0 | avoid — BOOT pull-down on dev boards |
+| ADC1_CH1 | GPIO 1 | avoid — strapping pin on some boards |
 | ADC1_CH2 | GPIO 2 | CH2 OUTPUT (future) |
 | ADC1_CH3 | GPIO 3 | CH3 OUTPUT (future) |
-| ADC1_CH4 | GPIO 4 | spare |
-| ADC1_CH5 | GPIO 5 | spare |
-| ADC1_CH6 | GPIO 6 | spare (here used as LO+ CH0) |
+| ADC1_CH4 | GPIO 4 | **CH0 OUTPUT** |
+| ADC1_CH5 | GPIO 5 | **CH1 OUTPUT** |
+| ADC1_CH6 | GPIO 6 | digital only here (LO+ CH0) |
 
 ---
 

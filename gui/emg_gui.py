@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import collections
 import json
+import os
 import sys
 import threading
 import time
@@ -28,7 +29,16 @@ import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from gesture_engine import GestureEngine
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+GESTURE_TEMPLATES_PATH = os.path.join(_HERE, "gestures.json")
+
 engine = GestureEngine()
+if os.path.exists(GESTURE_TEMPLATES_PATH):
+    try:
+        engine.load(GESTURE_TEMPLATES_PATH)
+    except Exception:
+        pass
 
 # ── config ───────────────────────────────────────────────────────────────────
 API_HOST = sys.argv[1] if len(sys.argv) > 1 else "localhost"
@@ -87,9 +97,10 @@ raw_bufs: list[collections.deque] = []
 rms_bufs: list[collections.deque] = []
 connected = {"value": False}
 dirty = {"plot": False, "rebuild": False}
-drag  = {"active_idx": None, "enabled": False}
-cal   = {"step": 0, "active": False, "msg": "", "sub": "", "channel": 0}
-mode  = {"current": "THRESHOLD"}         # THRESHOLD, GESTURE
+drag     = {"active_idx": None, "enabled": False}
+cal      = {"step": 0, "active": False, "msg": "", "sub": "", "channel": 0}
+mode     = {"current": "THRESHOLD"}      # THRESHOLD, GESTURE
+gest_rec = {"active": False, "msg": "", "sub": ""}  # gesture recording status
 
 
 def init_buffers(n: int) -> None:
@@ -321,32 +332,200 @@ side = tk.Frame(root, bg=THEME["panel"], width=SIDE_W)
 side.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 6), pady=(6, 0))
 side.pack_propagate(False)
 
-tk.Label(side, text="MODE", bg=THEME["panel"], fg=THEME["fg"],
-         font=FONT_M).pack(pady=(12, 6))
+# ── mode selector (segmented control) ────────────────────────────────────────
+_seg_outer = tk.Frame(side, bg=THEME["border"])
+_seg_outer.pack(fill=tk.X, padx=8, pady=(12, 8))
+_seg_inner = tk.Frame(_seg_outer, bg=THEME["border"])
+_seg_inner.pack(fill=tk.X, padx=1, pady=1)
 
-mode_btn_text = tk.StringVar(value="THRESHOLD")
 
-def on_toggle_mode():
+def _activate_threshold() -> None:
     if mode["current"] == "THRESHOLD":
-        mode["current"] = "GESTURE"
-        mode_btn_text.set("GESTURE")
-        mode_btn.configure(bg="#0d4a1a")
-    else:
-        mode["current"] = "THRESHOLD"
-        mode_btn_text.set("THRESHOLD")
-        mode_btn.configure(bg=THEME["off_bg"])
+        return
+    mode["current"] = "THRESHOLD"
+    _seg_thr.configure(bg=THEME["off_bg"], fg=THEME["fg"])
+    _seg_ges.configure(bg=THEME["panel"], fg=THEME["muted"])
+    gesture_lbl.configure(text="GESTURE: —", fg=THEME["accent"])
+    gesture_panel.pack_forget()
 
-mode_btn = tk.Button(side, textvariable=mode_btn_text,
-                     command=on_toggle_mode,
-                     bg=THEME["off_bg"], fg="white",
+
+def _activate_gesture() -> None:
+    if mode["current"] == "GESTURE":
+        return
+    mode["current"] = "GESTURE"
+    _seg_thr.configure(bg=THEME["panel"], fg=THEME["muted"])
+    _seg_ges.configure(bg="#0d4a1a", fg="white")
+    gesture_panel.pack(fill=tk.X)
+    rebuild_gesture_list()
+
+
+_seg_thr = tk.Button(_seg_inner, text="THRESHOLD",
+                     command=_activate_threshold,
+                     bg=THEME["off_bg"], fg=THEME["fg"],
                      activebackground=THEME["border"],
-                     font=FONT_M, relief=tk.FLAT, padx=8, pady=3,
-                     cursor="hand2")
-mode_btn.pack(pady=(0, 6))
+                     font=FONT_XS, relief=tk.FLAT, pady=6, cursor="hand2")
+_seg_thr.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+tk.Frame(_seg_inner, bg=THEME["border"], width=1).pack(side=tk.LEFT, fill=tk.Y)
+
+_seg_ges = tk.Button(_seg_inner, text="GESTURE",
+                     command=_activate_gesture,
+                     bg=THEME["panel"], fg=THEME["muted"],
+                     activebackground=THEME["border"],
+                     font=FONT_XS, relief=tk.FLAT, pady=6, cursor="hand2")
+_seg_ges.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+# ── detected gesture label ────────────────────────────────────────────────────
 gesture_lbl = tk.Label(side, text="GESTURE: —", bg=THEME["panel"],
                        fg=THEME["accent"], font=FONT_L)
-gesture_lbl.pack(pady=(12, 6))
+gesture_lbl.pack(pady=(4, 2))
+
+# ── gesture panel (inside always-present placeholder frame) ──────────────────
+gesture_area = tk.Frame(side, bg=THEME["panel"])
+gesture_area.pack(fill=tk.X)
+
+gesture_panel = tk.Frame(gesture_area, bg=THEME["panel"])
+# packed/unpacked by _activate_threshold / _activate_gesture
+
+# --- record row ---
+_rec_row = tk.Frame(gesture_panel, bg=THEME["panel"])
+_rec_row.pack(fill=tk.X, padx=6, pady=(6, 2))
+
+gesture_name_var = tk.StringVar()
+_grec_entry = tk.Entry(_rec_row, textvariable=gesture_name_var,
+                       bg=THEME["off_bg"], fg=THEME["muted"],
+                       insertbackground="white",
+                       font=FONT_S, relief=tk.FLAT)
+_grec_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4), ipady=4)
+_grec_entry.insert(0, "name…")
+_grec_entry.bind("<FocusIn>",  lambda e: (
+    _grec_entry.delete(0, tk.END),
+    _grec_entry.configure(fg="white"),
+) if gesture_name_var.get() == "name…" else None)
+_grec_entry.bind("<FocusOut>", lambda e: (
+    _grec_entry.insert(0, "name…"),
+    _grec_entry.configure(fg=THEME["muted"]),
+) if not gesture_name_var.get().strip() else None)
+
+
+def on_record_gesture() -> None:
+    name = gesture_name_var.get().strip()
+    if not name or name == "name…":
+        return
+    with lock:
+        if gest_rec["active"]:
+            return
+        gest_rec["active"] = True
+    threading.Thread(target=run_gesture_recording, args=(name,),
+                     daemon=True).start()
+
+
+_grec_btn = tk.Button(_rec_row, text="REC 3s",
+                      command=on_record_gesture,
+                      bg="#0d4a1a", fg="white",
+                      activebackground=THEME["rest_bg"],
+                      font=FONT_M, relief=tk.FLAT, padx=8, pady=3,
+                      cursor="hand2")
+_grec_btn.pack(side=tk.LEFT)
+
+# --- recording status ---
+_rec_status = tk.Label(gesture_panel, text="",
+                       bg=THEME["panel"], fg=THEME["accent"],
+                       font=FONT_XS, anchor="center")
+_rec_status.pack(fill=tk.X, padx=6, pady=(2, 0))
+
+# --- divider ---
+tk.Frame(gesture_panel, bg=THEME["border"], height=1).pack(
+    fill=tk.X, padx=6, pady=(8, 0))
+
+# --- template list header ---
+_tpl_hdr_row = tk.Frame(gesture_panel, bg=THEME["panel"])
+_tpl_hdr_row.pack(fill=tk.X, padx=6, pady=(6, 3))
+_tpl_count_lbl = tk.Label(_tpl_hdr_row, text="TEMPLATES",
+                           bg=THEME["panel"], fg=THEME["muted"], font=FONT_XS)
+_tpl_count_lbl.pack(side=tk.LEFT)
+
+# --- template cards ---
+gesture_list_frame = tk.Frame(gesture_panel, bg=THEME["panel"])
+gesture_list_frame.pack(fill=tk.X, padx=6, pady=(0, 6))
+
+
+def set_gesture_status(msg: str, sub: str = "") -> None:
+    with lock:
+        gest_rec["msg"] = msg
+        gest_rec["sub"] = sub
+
+
+def rebuild_gesture_list() -> None:
+    for w in gesture_list_frame.winfo_children():
+        w.destroy()
+    labels = engine.get_labels()
+    _tpl_count_lbl.configure(
+        text=f"TEMPLATES  ({len(labels)})" if labels else "TEMPLATES"
+    )
+    if not labels:
+        tk.Label(gesture_list_frame, text="no templates recorded yet",
+                 bg=THEME["panel"], fg="#555d68",
+                 font=FONT_XS, anchor="w").pack(fill=tk.X, pady=2)
+        return
+    for i, lbl in enumerate(labels):
+        accent = CH_COLORS[i % len(CH_COLORS)]
+        card = tk.Frame(gesture_list_frame, bg=THEME["off_bg"])
+        card.pack(fill=tk.X, pady=(0, 2))
+        tk.Frame(card, bg=accent, width=3).pack(side=tk.LEFT, fill=tk.Y)
+        tk.Label(card, text=f"  {lbl}", bg=THEME["off_bg"],
+                 fg=THEME["fg"], font=FONT_S,
+                 anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True, pady=5)
+
+        def _make_del(label: str):
+            def _del():
+                engine.delete_template(label)
+                try:
+                    engine.save(GESTURE_TEMPLATES_PATH)
+                except Exception:
+                    pass
+                rebuild_gesture_list()
+            return _del
+
+        tk.Button(card, text="x", command=_make_del(lbl),
+                  bg=THEME["off_bg"], fg="#555d68",
+                  activebackground="#3a1a1a", activeforeground=THEME["warn"],
+                  font=FONT_S, relief=tk.FLAT, padx=6, pady=3,
+                  cursor="hand2").pack(side=tk.RIGHT)
+
+
+def run_gesture_recording(label: str, rec_secs: int = 3) -> None:
+    set_gesture_status("Get ready…  hold gesture in 1s")
+    time.sleep(1.0)
+    n_ch = len(ch_meta)
+    collected: list[list[float]] = [[] for _ in range(n_ch)]
+    deadline = time.time() + rec_secs
+    while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            break
+        set_gesture_status(f"Recording '{label}'…  {int(remaining) + 1}s")
+        with lock:
+            for ci in range(n_ch):
+                if ci < len(rms_bufs) and rms_bufs[ci]:
+                    collected[ci].append(rms_bufs[ci][-1])
+        time.sleep(0.05)
+    set_gesture_status("Saving…")
+    engine.record_template(label, collected)
+    try:
+        engine.save(GESTURE_TEMPLATES_PATH)
+    except Exception as exc:
+        set_gesture_status(f"Error: {exc}")
+        with lock:
+            gest_rec["active"] = False
+        return
+    root.after(0, rebuild_gesture_list)
+    set_gesture_status(f"Saved: {label}")
+    time.sleep(2)
+    set_gesture_status("")
+    with lock:
+        gest_rec["active"] = False
+
 
 tk.Label(side, text="THRESHOLDS", bg=THEME["panel"], fg=THEME["fg"],
          font=FONT_M).pack(pady=(12, 6))
@@ -460,8 +639,8 @@ canvas = FigureCanvasTkAgg(fig, master=root)
 canvas.get_tk_widget().pack(side=tk.LEFT, fill=tk.BOTH, expand=True,
                             padx=(6, 2), pady=(6, 2))
 
-ax_raw      = None                   # one Raw plot showing all channels
-ax_rms_list: list = []               # one RMS subplot per channel
+ax_raw        = None                 # shared Raw overlay (all channels)
+ax_rms_list:   list = []             # one RMS subplot per channel
 line_raw_list: list = []             # raw lines (one per channel)
 line_rms_list: list = []             # rms lines (one per channel)
 thr_lines:     list = []             # threshold dashed lines
@@ -495,7 +674,7 @@ def rebuild_figure() -> None:
     ax_rms_list, line_raw_list, line_rms_list, thr_lines, channel_title_texts, last_points, fill_polys = [], [], [], [], [], [], []
 
     n = max(1, len(ch_meta))
-    # Layout: 1 raw plot on top + N rms subplots stacked below.
+    # Layout: 1 shared Raw overlay on top + N individual RMS subplots below.
     gs = gridspec.GridSpec(1 + n, 1,
                            hspace=0.55, top=0.95, bottom=0.07,
                            left=0.07, right=0.98,
@@ -521,13 +700,13 @@ def rebuild_figure() -> None:
         color = CH_COLORS[i % len(CH_COLORS)]
         ax = fig.add_subplot(gs[i + 1])
         style_axis(ax, "", (0, 700))
-        title = ax.set_title(f"RMS  CH{m['id']}  {m['label']}  |  live: 0.0",
-                             color=THEME["fg"], fontsize=9, pad=3, loc="left")
+        title = ax.set_title(
+            f"CH{m['id']}  {m['label']}  —  RMS  |  live: 0.0",
+            color=color, fontsize=9, pad=3, loc="left")
         line, = ax.plot(t, [0.0] * WINDOW, color=color, lw=1.8)
         point, = ax.plot([WINDOW - 1], [0.0], marker="o", ms=5, color=color)
         fill = ax.fill_between(t, [0.0] * WINDOW, 0, color=color, alpha=0.16)
-        thr_line = ax.axhline(80, color=THEME["warn"], lw=1.4, ls="--",
-                              picker=6)
+        thr_line = ax.axhline(80, color=THEME["warn"], lw=1.4, ls="--", picker=6)
         ax_rms_list.append(ax)
         line_rms_list.append(line)
         thr_lines.append(thr_line)
@@ -596,6 +775,9 @@ def refresh() -> None:
             msg, sub = cal["msg"], cal["sub"]
             raw_lists = [list(b) for b in raw_bufs]
             rms_lists = [list(b) for b in rms_bufs]
+            grec_active = gest_rec["active"]
+            grec_msg    = gest_rec["msg"]
+            grec_sub    = gest_rec["sub"]
 
         if need_rebuild:
             rebuild_figure()
@@ -608,27 +790,26 @@ def refresh() -> None:
             need_redraw = True
 
         if need_redraw and ax_raw is not None:
-            for i, line in enumerate(line_raw_list):
-                if i < len(raw_lists):
-                    line.set_ydata(raw_lists[i])
-                elif i < len(snap):
-                    line.set_ydata([float(snap[i].get("raw", 2048.0))] * WINDOW)
-            for i, line in enumerate(line_rms_list):
-                if i < len(rms_lists):
-                    values = rms_lists[i]
-                elif i < len(snap):
-                    live_rms = float(snap[i].get("rms", 0.0))
-                    values = [live_rms] * WINDOW
-                else:
-                    continue
+            # Pad lists so every plot line always has proper buffer data.
+            # Without this, channels beyond rms_lists length fall back to a
+            # flat line at the current value which looks like "no history".
+            while len(raw_lists) < len(line_raw_list):
+                raw_lists.append([2048.0] * WINDOW)
+            while len(rms_lists) < len(line_rms_list):
+                rms_lists.append([0.0] * WINDOW)
 
+            for i, line in enumerate(line_raw_list):
+                line.set_ydata(raw_lists[i])
+            for i, line in enumerate(line_rms_list):
+                values = rms_lists[i]
                 line.set_ydata(values)
                 thr = snap[i]["threshold"] if i < len(snap) else 80.0
                 ax_rms_list[i].set_ylim(*rms_ylim(values, thr))
                 if i < len(snap) and i < len(channel_title_texts) and i < len(ch_meta):
                     live_rms = float(snap[i].get("rms", 0.0))
                     channel_title_texts[i].set_text(
-                        f"RMS  CH{ch_meta[i]['id']}  {ch_meta[i]['label']}  |  live: {live_rms:.1f}"
+                        f"CH{ch_meta[i]['id']}  {ch_meta[i]['label']}"
+                        f"  —  RMS  |  live: {live_rms:.1f}"
                     )
                 line.set_alpha(1.0 if any(v > 0.0 for v in values[-12:]) else 0.35)
                 if i < len(last_points):
@@ -688,11 +869,24 @@ def refresh() -> None:
         state_lbl.configure(bg=color, text=label)
 
         if mode["current"] == "GESTURE":
-            rms_vals = [float(c.get("rms", 0.0)) for c in snap]
-            pred = engine.classify(rms_vals)
-            gesture_lbl.configure(text=f"GESTURE: {pred}")
+            rms_vals  = [float(c.get("rms", 0.0))       for c in snap]
+            thresholds = [float(c.get("threshold", 80.0)) for c in snap]
+            # All channels below their threshold → resting state
+            if snap and all(r < t for r, t in zip(rms_vals, thresholds)):
+                pred = "RELAXED"
+                gesture_lbl.configure(text="GESTURE: RELAXED", fg=THEME["ok"])
+            else:
+                pred = engine.classify(rms_vals)
+                col = THEME["warn"] if pred not in ("NO TEMPLATES", "UNKNOWN", "RELAXED") \
+                      else THEME["accent"]
+                gesture_lbl.configure(text=f"GESTURE: {pred}", fg=col)
+            _rec_status.configure(text=grec_msg)
+            _grec_btn.configure(
+                bg="#3a1a1a" if grec_active else "#0d4a1a",
+                state=tk.DISABLED if grec_active else tk.NORMAL,
+            )
         else:
-            gesture_lbl.configure(text="GESTURE: —")
+            gesture_lbl.configure(text="GESTURE: —", fg=THEME["accent"])
 
         cal_msg_lbl.configure(text=msg or "Press CALIBRATE to begin")
         cal_sub_lbl.configure(text=sub)

@@ -2,9 +2,14 @@
 
 All notable changes to this project are documented here.
 
----
+## [1.0.1] - 2026-05-14
 
-## [1.0.1 - Multi Channel update] — 2026-05-09
+### Added
+- Multi-channel gesture classification mode.
+- GUI mode switcher between Threshold and Gesture detection.
+- Unified English UI labels.
+
+---
 
 ### Multi-channel architecture
 

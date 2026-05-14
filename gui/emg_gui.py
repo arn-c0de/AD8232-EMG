@@ -27,6 +27,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
+from gesture_engine import GestureEngine
+engine = GestureEngine()
+
 # ── config ───────────────────────────────────────────────────────────────────
 API_HOST = sys.argv[1] if len(sys.argv) > 1 else "localhost"
 API_PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 5555
@@ -86,6 +89,7 @@ connected = {"value": False}
 dirty = {"plot": False, "rebuild": False}
 drag  = {"active_idx": None, "enabled": False}
 cal   = {"step": 0, "active": False, "msg": "", "sub": "", "channel": 0}
+mode  = {"current": "THRESHOLD"}         # THRESHOLD, GESTURE
 
 
 def init_buffers(n: int) -> None:
@@ -316,6 +320,33 @@ btn_reset.pack(side=tk.LEFT)
 side = tk.Frame(root, bg=THEME["panel"], width=SIDE_W)
 side.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 6), pady=(6, 0))
 side.pack_propagate(False)
+
+tk.Label(side, text="MODE", bg=THEME["panel"], fg=THEME["fg"],
+         font=FONT_M).pack(pady=(12, 6))
+
+mode_btn_text = tk.StringVar(value="THRESHOLD")
+
+def on_toggle_mode():
+    if mode["current"] == "THRESHOLD":
+        mode["current"] = "GESTURE"
+        mode_btn_text.set("GESTURE")
+        mode_btn.configure(bg="#0d4a1a")
+    else:
+        mode["current"] = "THRESHOLD"
+        mode_btn_text.set("THRESHOLD")
+        mode_btn.configure(bg=THEME["off_bg"])
+
+mode_btn = tk.Button(side, textvariable=mode_btn_text,
+                     command=on_toggle_mode,
+                     bg=THEME["off_bg"], fg="white",
+                     activebackground=THEME["border"],
+                     font=FONT_M, relief=tk.FLAT, padx=8, pady=3,
+                     cursor="hand2")
+mode_btn.pack(pady=(0, 6))
+
+gesture_lbl = tk.Label(side, text="GESTURE: —", bg=THEME["panel"],
+                       fg=THEME["accent"], font=FONT_L)
+gesture_lbl.pack(pady=(12, 6))
 
 tk.Label(side, text="THRESHOLDS", bg=THEME["panel"], fg=THEME["fg"],
          font=FONT_M).pack(pady=(12, 6))
@@ -655,6 +686,13 @@ def refresh() -> None:
             color, label = THEME["rest_bg"], "relaxed"
         state_frame.configure(bg=color)
         state_lbl.configure(bg=color, text=label)
+
+        if mode["current"] == "GESTURE":
+            rms_vals = [float(c.get("rms", 0.0)) for c in snap]
+            pred = engine.classify(rms_vals)
+            gesture_lbl.configure(text=f"GESTURE: {pred}")
+        else:
+            gesture_lbl.configure(text="GESTURE: —")
 
         cal_msg_lbl.configure(text=msg or "Press CALIBRATE to begin")
         cal_sub_lbl.configure(text=sub)
